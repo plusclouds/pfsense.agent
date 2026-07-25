@@ -126,7 +126,27 @@ All operations are opt-in. Remove any entry from `allowed_operations` in the con
 
 ## Installation
 
-### 1. Deploy the binary
+### Quick install (recommended)
+
+`scripts/install.sh` installs (or upgrades) the agent as a systemd service in one step: it resolves the latest GitHub release (or a version you pin), downloads `plusclouds.linux` and the systemd unit, sets up `/var/log/plusclouds` and `/etc/plusclouds`, and enables + starts the service. It's safe to re-run for upgrades.
+
+```bash
+# Install the latest release
+curl -fsSL https://raw.githubusercontent.com/plusclouds/vm.agent/master/scripts/install.sh | sudo bash
+
+# Or pin a specific release
+curl -fsSL https://raw.githubusercontent.com/plusclouds/vm.agent/master/scripts/install.sh | sudo bash -s v2.0.0
+
+# Or, if you already have the repo checked out
+sudo ./scripts/install.sh          # latest
+sudo ./scripts/install.sh v2.0.0   # pinned
+```
+
+Requirements: root, `curl`, systemd, and `amd64` (the only architecture published today). There's no config file to set up afterward — the agent reads its identity and runtime settings from the config-drive ISO the platform attaches to the VM (see [Attach the config-drive](#3-attach-the-config-drive) below). If the VM has no config-drive (e.g. local testing), set `PLUSCLOUDS_AGENT_NATS_AGENT_UUID` / `PLUSCLOUDS_AGENT_NATS_API_KEY` in `/etc/plusclouds/environment` and restart the service.
+
+### Manual installation
+
+#### 1. Deploy the binary
 
 ```bash
 # Linux
@@ -137,18 +157,18 @@ chmod +x /usr/local/bin/plusclouds-agent
 # Copy bin/plusclouds.windows to the target machine and run it as a service
 ```
 
-### 2. Create the runtime directories
+#### 2. Create the runtime directories
 
 ```bash
 mkdir -p /var/log/plusclouds /var/lib/plusclouds/cache
 chmod 0750 /var/log/plusclouds
 ```
 
-### 3. Attach the config-drive
+#### 3. Attach the config-drive
 
 The platform attaches a config-drive ISO (labelled `plusclouds-config`, containing `pc-meta-data.json`) to the VM during provisioning. The agent mounts it automatically at boot, reads its identity, NATS, and runtime settings from it, and caches a local copy under `/var/lib/plusclouds/cache/` so it keeps working on later boots even if the drive is later detached. There's nothing to deploy manually — if you're running the agent somewhere the config-drive isn't attached (e.g. local testing), see [Configuration reference](#configuration-reference) below for the built-in defaults and environment variable overrides.
 
-### 4. Install and start the systemd service
+#### 4. Install and start the systemd service
 
 ```bash
 scp systemd/plusclouds-agent.service root@<server-ip>:/etc/systemd/system/
@@ -156,7 +176,7 @@ systemctl daemon-reload
 systemctl enable --now plusclouds-agent
 ```
 
-### 5. Verify
+#### 5. Verify
 
 ```bash
 journalctl -fu plusclouds-agent
