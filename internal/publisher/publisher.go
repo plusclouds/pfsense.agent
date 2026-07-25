@@ -225,6 +225,14 @@ var operationCatalog = map[string]protocol.OperationSchema{
 		Operation:   "system.update",
 		Description: "Run apt-get update && apt-get upgrade -y. Supported on Ubuntu/Debian only.",
 	},
+	"disk.resize": {
+		Operation:   "disk.resize",
+		Description: "Grow a filesystem to fill its underlying disk after a volume expand. Supports ext2/ext3/ext4 and XFS on Linux; NTFS on Windows.",
+		Params: []protocol.OperationParam{
+			{Name: "name", Type: "string", Required: false,
+				Description: `Target mountpoint (Linux, e.g. "/") or drive letter (Windows, e.g. "C"). Defaults to the root/system volume if omitted.`},
+		},
+	},
 	"telemetry.set_interval": {
 		Operation:   "telemetry.set_interval",
 		Description: "Change the telemetry push interval at runtime. Minimum 5 seconds.",

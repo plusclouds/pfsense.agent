@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/plusclouds/ubuntu-agent/internal/executor"
+	"github.com/plusclouds/ubuntu-agent/internal/modules/diskresize"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/pfsense"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/services"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/system"
@@ -50,6 +51,12 @@ func (noopServices) Reload(context.Context, string) (*services.ActionResult, err
 func (noopServices) Enable(context.Context, string) (*services.ActionResult, error)  { return nil, nil }
 func (noopServices) Disable(context.Context, string) (*services.ActionResult, error) { return nil, nil }
 
+// noopResizer is a diskresize.Resizer that is never exercised by the
+// redaction test below.
+type noopResizer struct{}
+
+func (noopResizer) Resize(context.Context, string) (*diskresize.Result, error) { return nil, nil }
+
 func TestDispatch_SetPasswordRedactsParamsInLog(t *testing.T) {
 	core, logs := observer.New(zap.DebugLevel)
 	logger := zap.New(core)
@@ -60,6 +67,7 @@ func TestDispatch_SetPasswordRedactsParamsInLog(t *testing.T) {
 		noopServices{},
 		pfs,
 		executor.New(logger),
+		noopResizer{},
 		nil, // publisher not exercised by this operation
 		"agent-uuid",
 		[]string{"pfsense.set_password"},

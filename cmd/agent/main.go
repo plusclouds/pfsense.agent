@@ -19,6 +19,7 @@ import (
 	"github.com/plusclouds/ubuntu-agent/internal/config"
 	"github.com/plusclouds/ubuntu-agent/internal/dispatcher"
 	"github.com/plusclouds/ubuntu-agent/internal/executor"
+	"github.com/plusclouds/ubuntu-agent/internal/modules/diskresize"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/pfsense"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/system"
 	natsclient "github.com/plusclouds/ubuntu-agent/internal/nats"
@@ -69,22 +70,28 @@ func run(_ *cobra.Command, _ []string) error {
 		zap.String("config_file", cfgFile),
 	)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	exec := executor.New(logger)
+
 	// ------------------------------------------------------------------ //
-	// 3. Resolve identity — config file is primary; ISO overrides if mounted.
+	// 3. Resolve identity — config file is primary; config-drive overrides
+	//    if present (mounted on demand if necessary, cached locally for
+	//    boots where the config-drive is no longer attached).
 	// ------------------------------------------------------------------ //
 	agentUUID := cfg.NATS.AgentUUID
 	agentAPIKey := cfg.NATS.APIKey
 
-	isoReader := isoconfig.NewReader(cfg.ISO.MountPath)
-	iso, err := isoReader.Read()
+	locator := isoconfig.NewLocator(exec, logger)
+	iso, err := isoconfig.Load(ctx, locator, cfg.ISO.MountPath, cfg.ISO.CachePath, cfg.ISO.Label, logger)
 	if err != nil {
-		logger.Debug("ISO config drive not available (expected in production)",
-			zap.String("mount_path", cfg.ISO.MountPath),
+		logger.Warn("could not resolve config-drive identity, using config-file identity",
 			zap.Error(err),
 		)
 		iso = &isoconfig.ISOMetadata{}
 	} else if iso.VMID() != "" {
-		logger.Debug("ISO config drive found, overriding agent identity",
+		logger.Debug("config-drive metadata found, overriding agent identity",
 			zap.String("vm_id", iso.VMID()),
 		)
 		agentUUID = iso.VMID()
@@ -103,9 +110,6 @@ func run(_ *cobra.Command, _ []string) error {
 	// ------------------------------------------------------------------ //
 	// 4. Initialise platform-specific service manager
 	// ------------------------------------------------------------------ //
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	svcMgr, svcCleanup := newServiceManager(ctx, logger)
 	defer svcCleanup()
 
@@ -113,8 +117,8 @@ func run(_ *cobra.Command, _ []string) error {
 	// 5. Initialise remaining modules
 	// ------------------------------------------------------------------ //
 	sysMod := system.New(iso)
-	exec := executor.New(logger)
 	pfsMod := pfsense.New(exec, logger)
+	resizer := diskresize.New(exec, logger)
 	logger.Info("modules initialised",
 		zap.Int("allowed_operations", len(cfg.Agent.AllowedOperations)),
 		zap.Int("allowed_commands", len(cfg.Agent.AllowedCommands)),
@@ -146,7 +150,7 @@ func run(_ *cobra.Command, _ []string) error {
 	pub := publisher.New(nc, sysMod, agentUUID, cfg.Agent, logger)
 
 	disp := dispatcher.New(
-		sysMod, svcMgr, pfsMod, exec, pub,
+		sysMod, svcMgr, pfsMod, exec, resizer, pub,
 		agentUUID,
 		cfg.Agent.AllowedOperations,
 		cfg.Agent.AllowedCommands,
