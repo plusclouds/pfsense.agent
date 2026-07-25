@@ -26,6 +26,14 @@ pidfile="/var/run/${name}.pid"
 command="/usr/sbin/daemon"
 command_args="-f -p ${pidfile} -o ${plusclouds_agent_daemon_log} -t plusclouds-agent /usr/local/bin/plusclouds-agent"
 
+# daemon(8)'s -p writes the PID of the actual agent process (its child),
+# not of daemon(8) itself — but rc.subr's status/stop checks default to
+# verifying the pidfile's PID belongs to a process named after $command
+# ("daemon"). Without this, status/stop never find the running agent (it's
+# named "plusclouds-agent", not "daemon") and report "not running" even
+# while it's alive and working.
+procname="/usr/local/bin/plusclouds-agent"
+
 start_precmd="${name}_prestart"
 
 # There's no config file — the agent reads its identity and runtime config
