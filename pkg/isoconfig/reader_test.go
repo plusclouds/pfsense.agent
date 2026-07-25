@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/plusclouds/ubuntu-agent/pkg/isoconfig"
 )
 
@@ -22,52 +20,35 @@ func sampleMetadata() isoconfig.VirtualMachineMetadata {
 		Username:         "root",
 		Password:         "s3cr3t",
 		VirtualMachineID: "016c6a79-dbbe-4284-9ea0-75645ede8ca3",
-		VirtualDisks: isoconfig.DataList[isoconfig.VirtualDisk]{
-			Data: []isoconfig.VirtualDisk{
-				{DiskType: "user", DeviceNumber: 0, TotalDisk: 85899345920},
-				{DiskType: "cdrom", DeviceNumber: 3, TotalDisk: 0},
-			},
+		AgentAPIKey:      "SncBECa7ezSovHKCgsgRqN4vomcQuTgRRpAPCtyhAN8DvhfA5xh1SRW1oi4C6ffw",
+		VirtualDisks: []isoconfig.VirtualDisk{
+			{DiskType: "user", DeviceNumber: 0, TotalDisk: 85899345920},
+			{DiskType: "cdrom", DeviceNumber: 3, TotalDisk: 0},
 		},
-		VirtualNetworkCards: isoconfig.DataList[isoconfig.VirtualNetworkCard]{
-			Data: []isoconfig.VirtualNetworkCard{
-				{
-					DeviceNumber: 0,
-					MACAddr:      "7a:9c:c0:d0:ff:bc",
-					Network: isoconfig.DataWrapper[isoconfig.Network]{
-						Data: isoconfig.Network{
-							IPAddr:         "185.255.172.0/22",
-							Gateway:        &gw,
-							Subnet:         "22",
-							Netmask:        "255.255.252.0",
-							NetworkAddress: "185.255.172.0",
-							DNSNameservers: []string{"8.8.4.4/32", "8.8.8.8/32"},
-							MTU:            1500,
-						},
-					},
-					IPList: isoconfig.DataList[isoconfig.IPEntry]{
-						Data: []isoconfig.IPEntry{
-							{
-								ID:     "c8774f6f-1d5e-4359-b450-b0ccba1bdb01",
-								IPAddr: "185.255.172.129/32",
-							},
-						},
+		VirtualNetworkCards: []isoconfig.VirtualNetworkCard{
+			{
+				DeviceNumber: 0,
+				MACAddr:      "7a:9c:c0:d0:ff:bc",
+				NetworkName:  "Public Internet",
+				Network: isoconfig.Network{
+					Name:           "Public Internet",
+					IPAddr:         "185.255.172.0/22",
+					Gateway:        &gw,
+					Subnet:         "22",
+					Netmask:        "255.255.252.0",
+					NetworkAddress: "185.255.172.0",
+					DNSNameservers: []string{"8.8.4.4/32", "8.8.8.8/32"},
+					MTU:            1500,
+				},
+				IPList: isoconfig.DataList[isoconfig.IPEntry]{
+					Data: []isoconfig.IPEntry{
+						{ID: 1011, IPAddr: "185.255.172.129/32"},
 					},
 				},
 			},
 		},
-		ServiceRoles:  isoconfig.DataList[isoconfig.ServiceRole]{},
-		SSHPublicKeys: []string{},
-	}
-}
-
-func writeYAML(t *testing.T, dir, filename string, v interface{}) {
-	t.Helper()
-	data, err := yaml.Marshal(v)
-	if err != nil {
-		t.Fatalf("yaml.Marshal %s: %v", filename, err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, filename), data, 0600); err != nil {
-		t.Fatalf("write %s: %v", filename, err)
+		ServiceRoles: []isoconfig.ServiceRole{},
+		SSHKeys:      []string{},
 	}
 }
 
@@ -83,12 +64,12 @@ func writeJSONFile(t *testing.T, dir, filename string, v interface{}) {
 }
 
 // ---------------------------------------------------------------------------
-// Reader.Read — YAML
+// Reader.Read — JSON
 // ---------------------------------------------------------------------------
 
-func TestRead_YAML_ParsesAllFields(t *testing.T) {
+func TestRead_ParsesAllFields(t *testing.T) {
 	dir := t.TempDir()
-	writeYAML(t, dir, "metadata.yaml", sampleMetadata())
+	writeJSONFile(t, dir, "pc-meta-data.json", sampleMetadata())
 
 	meta, err := isoconfig.NewReader(dir).Read()
 	if err != nil {
@@ -97,7 +78,7 @@ func TestRead_YAML_ParsesAllFields(t *testing.T) {
 
 	raw := meta.Raw()
 	if raw == nil {
-		t.Fatal("Raw() should not be nil after reading a valid metadata.yaml")
+		t.Fatal("Raw() should not be nil after reading a valid pc-meta-data.json")
 	}
 	if raw.Hostname != "enelsa-s-r-v" {
 		t.Errorf("Hostname: got %q", raw.Hostname)
@@ -105,13 +86,13 @@ func TestRead_YAML_ParsesAllFields(t *testing.T) {
 	if raw.VirtualMachineID != "016c6a79-dbbe-4284-9ea0-75645ede8ca3" {
 		t.Errorf("VirtualMachineID: got %q", raw.VirtualMachineID)
 	}
-	if len(raw.VirtualDisks.Data) != 2 {
-		t.Errorf("VirtualDisks: expected 2, got %d", len(raw.VirtualDisks.Data))
+	if len(raw.VirtualDisks) != 2 {
+		t.Errorf("VirtualDisks: expected 2, got %d", len(raw.VirtualDisks))
 	}
-	if len(raw.VirtualNetworkCards.Data) != 1 {
-		t.Errorf("VirtualNetworkCards: expected 1, got %d", len(raw.VirtualNetworkCards.Data))
+	if len(raw.VirtualNetworkCards) != 1 {
+		t.Errorf("VirtualNetworkCards: expected 1, got %d", len(raw.VirtualNetworkCards))
 	}
-	nic := raw.VirtualNetworkCards.Data[0]
+	nic := raw.VirtualNetworkCards[0]
 	if nic.MACAddr != "7a:9c:c0:d0:ff:bc" {
 		t.Errorf("MACAddr: got %q", nic.MACAddr)
 	}
@@ -123,51 +104,62 @@ func TestRead_YAML_ParsesAllFields(t *testing.T) {
 	}
 }
 
-func TestRead_YAML_InvalidYAML_ReturnsError(t *testing.T) {
+func TestRead_InvalidJSON_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "metadata.yaml"), []byte(":\tinvalid\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "pc-meta-data.json"), []byte("{not valid json"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := isoconfig.NewReader(dir).Read()
 	if err == nil {
-		t.Error("expected parse error for invalid YAML")
+		t.Error("expected parse error for invalid JSON")
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Reader.Read — JSON fallback
-// ---------------------------------------------------------------------------
-
-func TestRead_JSONFallback(t *testing.T) {
+// TestRead_NumericIPEntryID_Parses is a regression test: the real platform
+// sends ip_list.data[].id as a JSON number (e.g. 1010), not a string. This
+// must not break parsing of the whole document.
+func TestRead_NumericIPEntryID_Parses(t *testing.T) {
 	dir := t.TempDir()
-	writeJSONFile(t, dir, "metadata.json", sampleMetadata())
+	raw := `{
+		"hostname": "tester-gw",
+		"virtual_machine_id": "34a35003-a9c1-4935-86c4-77b420b04816",
+		"agent_api_key": "SncBECa7ezSovHKCgsgRqN4vomcQuTgRRpAPCtyhAN8DvhfA5xh1SRW1oi4C6ffw",
+		"virtual_disks": [],
+		"virtual_network_cards": [
+			{
+				"device_number": 1,
+				"mac_addr": "12:ca:8c:2b:6d:b5",
+				"network_name": "tester-gw-3cac73c72a",
+				"network": {
+					"name": "tester-gw-3cac73c72a",
+					"ip_addr": "10.128.0.0/16",
+					"gateway": null,
+					"dhcp_server": null,
+					"dns_nameservers": ["8.8.4.4/32"],
+					"mtu": 1500
+				},
+				"ip_list": {
+					"data": [
+						{ "id": 1010, "ip_addr": "10.128.0.1/32", "is_reserved": false }
+					]
+				}
+			}
+		],
+		"service_roles": []
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "pc-meta-data.json"), []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	meta, err := isoconfig.NewReader(dir).Read()
 	if err != nil {
 		t.Fatalf("Read() error: %v", err)
 	}
-	if meta.VMID() != "016c6a79-dbbe-4284-9ea0-75645ede8ca3" {
-		t.Errorf("VMID: got %q", meta.VMID())
+	if got := meta.PrimaryIP(); got != "10.128.0.1/32" {
+		t.Errorf("PrimaryIP: got %q", got)
 	}
-}
-
-func TestRead_YAMLTakesPrecedenceOverJSON(t *testing.T) {
-	dir := t.TempDir()
-	yaml := sampleMetadata()
-	json := sampleMetadata()
-	json.Hostname = "from-json"
-	writeYAML(t, dir, "metadata.yaml", yaml)
-	writeJSONFile(t, dir, "metadata.json", json)
-
-	meta, err := isoconfig.NewReader(dir).Read()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if meta.Hostname() == "from-json" {
-		t.Error("expected YAML to take precedence over JSON fallback")
-	}
-	if meta.Hostname() != "enelsa-s-r-v" {
-		t.Errorf("Hostname: got %q", meta.Hostname())
+	if id := meta.Raw().VirtualNetworkCards[0].IPList.Data[0].ID; id != 1010 {
+		t.Errorf("IPEntry.ID: got %d", id)
 	}
 }
 
@@ -199,7 +191,7 @@ func TestRead_NonExistentMountPath_ReturnsEmptyMeta(t *testing.T) {
 func readSample(t *testing.T) *isoconfig.ISOMetadata {
 	t.Helper()
 	dir := t.TempDir()
-	writeYAML(t, dir, "metadata.yaml", sampleMetadata())
+	writeJSONFile(t, dir, "pc-meta-data.json", sampleMetadata())
 	meta, err := isoconfig.NewReader(dir).Read()
 	if err != nil {
 		t.Fatal(err)
@@ -232,6 +224,12 @@ func TestAccessors_APIKey_EqualsPassword(t *testing.T) {
 	}
 }
 
+func TestAccessors_AgentAPIKey(t *testing.T) {
+	if got := readSample(t).AgentAPIKey(); got != "SncBECa7ezSovHKCgsgRqN4vomcQuTgRRpAPCtyhAN8DvhfA5xh1SRW1oi4C6ffw" {
+		t.Errorf("AgentAPIKey: got %q", got)
+	}
+}
+
 func TestAccessors_PrimaryIP(t *testing.T) {
 	if got := readSample(t).PrimaryIP(); got != "185.255.172.129/32" {
 		t.Errorf("PrimaryIP: got %q", got)
@@ -256,9 +254,9 @@ func TestAccessors_DNSNameservers(t *testing.T) {
 
 func TestAccessors_GatewayNull_ReturnsEmpty(t *testing.T) {
 	m := sampleMetadata()
-	m.VirtualNetworkCards.Data[0].Network.Data.Gateway = nil
+	m.VirtualNetworkCards[0].Network.Gateway = nil
 	dir := t.TempDir()
-	writeYAML(t, dir, "metadata.yaml", m)
+	writeJSONFile(t, dir, "pc-meta-data.json", m)
 	meta, _ := isoconfig.NewReader(dir).Read()
 	if got := meta.Gateway(); got != "" {
 		t.Errorf("Gateway with null: expected empty, got %q", got)
@@ -298,9 +296,9 @@ func TestAccessors_NilRaw_AllReturnZero(t *testing.T) {
 
 func TestAccessors_NoPrimaryIP_WhenNoNICs(t *testing.T) {
 	m := sampleMetadata()
-	m.VirtualNetworkCards.Data = nil
+	m.VirtualNetworkCards = nil
 	dir := t.TempDir()
-	writeYAML(t, dir, "metadata.yaml", m)
+	writeJSONFile(t, dir, "pc-meta-data.json", m)
 	meta, _ := isoconfig.NewReader(dir).Read()
 	if got := meta.PrimaryIP(); got != "" {
 		t.Errorf("PrimaryIP with no NICs: got %q", got)
