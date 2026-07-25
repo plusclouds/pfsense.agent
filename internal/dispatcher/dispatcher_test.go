@@ -30,6 +30,11 @@ func (f *fakePfsense) SetPassword(_ context.Context, username, password string) 
 	return &pfsense.SetPasswordResult{Username: username, Success: true, Message: "password updated"}, nil
 }
 
+func (f *fakePfsense) SetDefaultUserPassword(_ context.Context, password string) (*pfsense.SetPasswordResult, error) {
+	f.gotPassword = password
+	return &pfsense.SetPasswordResult{Username: "admin", Success: true, Message: "password updated"}, nil
+}
+
 func (f *fakePfsense) ApplyBootNetworkConfig(_ context.Context, _ []isoconfig.VirtualNetworkCard) (*pfsense.BootNetworkResult, error) {
 	return nil, nil
 }

@@ -2,12 +2,18 @@
 <?php
 /*
  * Applies static IPv4 addressing (and optional gateway/DNS/MTU) to pfSense
- * interfaces that are already assigned to a physical NIC — this does not
- * perform interface assignment (wan/lan role selection). The PlusClouds
- * agent resolves which physical NIC (ifname) each plan entry targets by
- * matching MAC addresses from provisioning metadata before invoking this
- * script; interface_configure() brings each changed interface up live so
- * no reboot is required.
+ * interfaces. The PlusClouds agent resolves which physical NIC (ifname)
+ * each plan entry targets by matching MAC addresses from provisioning
+ * metadata before invoking this script; interface_configure() brings each
+ * changed interface up live so no reboot is required.
+ *
+ * If a NIC's ifname isn't yet assigned to any pfSense interface role, it is
+ * auto-assigned as "lan" — but ONLY if lan doesn't already exist. wan and
+ * an existing lan are never reassigned or touched, and at most one NIC per
+ * run is assigned this way (first unassigned NIC in the plan wins; a
+ * second one is left unassigned and reported as such). Full interface
+ * assignment (arbitrary opt roles, multi-NIC topologies) is still out of
+ * scope — this covers only the common two-NIC wan+lan default.
  *
  * stdin: JSON {"interfaces":[{"ifname","ipaddr","subnet","gateway","dns":[],"mtu"}]}
  */
@@ -31,16 +37,34 @@ foreach ($input['interfaces'] as $plan) {
 	$result = ['ifname' => $ifname, 'applied' => false];
 
 	$logical = null;
+	$lan_exists = false;
 	foreach (config_get_path('interfaces', []) as $name => $cfg) {
+		if ($name === 'lan') {
+			$lan_exists = true;
+		}
 		if (($cfg['if'] ?? null) === $ifname) {
 			$logical = $name;
 			break;
 		}
 	}
+
 	if ($logical === null) {
-		$result['message'] = "no pfSense interface assigned to {$ifname}";
-		$results[] = $result;
-		continue;
+		if ($lan_exists) {
+			$result['message'] = "no pfSense interface assigned to {$ifname}";
+			$results[] = $result;
+			continue;
+		}
+		// Auto-assign as lan — config_set_path mutates the in-memory
+		// config immediately, so the next iteration's fresh
+		// config_get_path('interfaces', []) call will see lan as existing
+		// and won't try to assign a second NIC this way.
+		config_set_path('interfaces/lan', [
+			'if'     => $ifname,
+			'descr'  => 'LAN',
+			'enable' => true,
+		]);
+		$logical = 'lan';
+		$result['assigned'] = true;
 	}
 
 	config_set_path("interfaces/{$logical}/ipaddr", $plan['ipaddr']);

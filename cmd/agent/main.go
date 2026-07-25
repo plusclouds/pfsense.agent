@@ -269,6 +269,7 @@ func applyBootNetworkConfig(ctx context.Context, cfg *config.Config, iso *isocon
 			zap.String("ifname", r.IfName),
 			zap.String("logical", r.Logical),
 			zap.Bool("applied", r.Applied),
+			zap.Bool("assigned", r.Assigned),
 			zap.String("message", r.Message),
 		)
 	}
@@ -305,28 +306,32 @@ func applyBootNetworkConfig(ctx context.Context, cfg *config.Config, iso *isocon
 	logger.Info("boot network config: applied and verified")
 }
 
-// applyBootPassword sets the pfSense local user's password from the ISO
-// metadata. Unlike network config this carries no NATS-reachability risk
-// (a local OS/config change, not a network change), so it's a simple
-// idempotent retry-until-success with no verification probe or revert.
+// applyBootPassword sets the password of pfSense's default superuser
+// account (matched by uid 0, not by name — see SetDefaultUserPassword)
+// from the ISO metadata's password field. The metadata's username field
+// (e.g. "root", a generic cross-platform convention) is not used: pfSense's
+// default account is "admin" and can be renamed, so it isn't a reliable
+// name to match against. Unlike network config this carries no
+// NATS-reachability risk (a local OS/config change, not a network change),
+// so it's a simple idempotent retry-until-success with no verification
+// probe or revert.
 func applyBootPassword(ctx context.Context, iso *isoconfig.ISOMetadata, pfsMod pfsense.Manager, logger *zap.Logger) {
 	if _, err := os.Stat(passwordMarkerPath); err == nil {
 		return
 	}
 
-	username, password := iso.Username(), iso.Password()
-	if username == "" || password == "" {
+	password := iso.Password()
+	if password == "" {
 		return
 	}
 
-	result, err := pfsMod.SetPassword(ctx, username, password)
+	result, err := pfsMod.SetDefaultUserPassword(ctx, password)
 	if err != nil {
 		logger.Error("boot password provisioning: failed", zap.Error(err))
 		return
 	}
 	if !result.Success {
 		logger.Warn("boot password provisioning: not applied, will retry next boot",
-			zap.String("username", username),
 			zap.String("message", result.Message),
 		)
 		return
@@ -336,7 +341,7 @@ func applyBootPassword(ctx context.Context, iso *isoconfig.ISOMetadata, pfsMod p
 		logger.Error("boot password provisioning: could not write marker file", zap.Error(err))
 		return
 	}
-	logger.Info("boot password provisioning: applied", zap.String("username", username))
+	logger.Info("boot password provisioning: applied", zap.String("username", result.Username))
 }
 
 func writeMarker(path string) error {

@@ -26,6 +26,9 @@ import (
 //go:embed scripts/set_password.php
 var setPasswordScript string
 
+//go:embed scripts/set_default_password.php
+var setDefaultPasswordScript string
+
 //go:embed scripts/netconfig/snapshot.php
 var netconfigSnapshotScript string
 
@@ -104,6 +107,35 @@ func (m *freebsdManager) SetPassword(ctx context.Context, username, password str
 	return &SetPasswordResult{Username: username, Success: true, Message: "password updated"}, nil
 }
 
+// SetDefaultUserPassword runs the embedded script that matches pfSense's
+// default superuser account by uid 0 rather than by name, since the
+// account's display name (usually "admin") isn't reliable to guess from
+// generic cross-platform VM metadata and can be renamed by the box owner.
+func (m *freebsdManager) SetDefaultUserPassword(ctx context.Context, password string) (*SetPasswordResult, error) {
+	if password == "" {
+		return nil, fmt.Errorf("password must not be empty")
+	}
+
+	stdout, stderr, err := runEmbeddedPHP(ctx, m.exec, setDefaultPasswordScript, "set_default_password.php", []byte(password))
+	if err != nil {
+		msg := stderr
+		if msg == "" {
+			msg = err.Error()
+		}
+		return &SetPasswordResult{Success: false, Message: msg}, nil
+	}
+
+	var out setPasswordScriptOutput
+	if jsonErr := json.Unmarshal([]byte(stdout), &out); jsonErr != nil {
+		return nil, fmt.Errorf("parsing script output %q: %w", stdout, jsonErr)
+	}
+	if out.Status != "ok" {
+		return &SetPasswordResult{Success: false, Message: "unexpected script status: " + out.Status}, nil
+	}
+
+	return &SetPasswordResult{Username: out.Username, Success: true, Message: "password updated"}, nil
+}
+
 // interfacePlanEntry is one entry of the JSON plan sent to netconfig/apply.php.
 type interfacePlanEntry struct {
 	IfName  string   `json:"ifname"`
@@ -121,10 +153,11 @@ type applyPlan struct {
 type applyScriptOutput struct {
 	Status     string `json:"status"`
 	Interfaces []struct {
-		IfName  string `json:"ifname"`
-		Logical string `json:"logical,omitempty"`
-		Applied bool   `json:"applied"`
-		Message string `json:"message,omitempty"`
+		IfName   string `json:"ifname"`
+		Logical  string `json:"logical,omitempty"`
+		Applied  bool   `json:"applied"`
+		Assigned bool   `json:"assigned,omitempty"`
+		Message  string `json:"message,omitempty"`
 	} `json:"interfaces"`
 }
 
@@ -144,9 +177,10 @@ func stripCIDRSuffix(s string) string {
 
 // ApplyBootNetworkConfig matches metadata NICs to local interfaces by MAC,
 // snapshots the live config, and applies static addressing to every matched,
-// resolvable NIC via the embedded netconfig scripts. NICs with no local MAC
-// match, or with no usable IP/subnet in the metadata, are reported as
-// unapplied rather than causing the whole call to fail.
+// resolvable NIC via the embedded netconfig scripts (which also handle the
+// lan-only auto-assignment described on the Manager interface). NICs with
+// no local MAC match, or with no usable IP/subnet in the metadata, are
+// reported as unapplied rather than causing the whole call to fail.
 func (m *freebsdManager) ApplyBootNetworkConfig(ctx context.Context, cards []isoconfig.VirtualNetworkCard) (*BootNetworkResult, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -225,10 +259,11 @@ func (m *freebsdManager) ApplyBootNetworkConfig(ctx context.Context, cards []iso
 	}
 	for _, r := range out.Interfaces {
 		results = append(results, InterfaceApplyResult{
-			IfName:  r.IfName,
-			Logical: r.Logical,
-			Applied: r.Applied,
-			Message: r.Message,
+			IfName:   r.IfName,
+			Logical:  r.Logical,
+			Applied:  r.Applied,
+			Assigned: r.Assigned,
+			Message:  r.Message,
 		})
 	}
 

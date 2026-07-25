@@ -31,6 +31,10 @@ func (m *stubManager) SetPassword(_ context.Context, username, _ string) (*SetPa
 	return &SetPasswordResult{Username: username, Success: false, Message: errNotSupported.Error()}, nil
 }
 
+func (m *stubManager) SetDefaultUserPassword(_ context.Context, _ string) (*SetPasswordResult, error) {
+	return &SetPasswordResult{Success: false, Message: errNotSupported.Error()}, nil
+}
+
 // ApplyBootNetworkConfig is a no-op outside pfSense/FreeBSD — boot
 // orchestration treats a nil result as "nothing to do" and skips silently.
 func (m *stubManager) ApplyBootNetworkConfig(_ context.Context, _ []isoconfig.VirtualNetworkCard) (*BootNetworkResult, error) {
