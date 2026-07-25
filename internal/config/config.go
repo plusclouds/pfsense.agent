@@ -15,8 +15,9 @@ import (
 	"github.com/spf13/viper"
 )
 
-// AgentVersion is set at build time via -ldflags.
-const AgentVersion = "0.2.0"
+// AgentVersion is set at build time via -ldflags (must stay a var — a
+// const can't be overridden by -ldflags -X, which silently no-ops on one).
+var AgentVersion = "dev"
 
 // Config is the top-level configuration structure for the agent.
 type Config struct {
