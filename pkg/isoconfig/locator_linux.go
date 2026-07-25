@@ -33,7 +33,7 @@ func (l *linuxLocator) Locate(ctx context.Context, mountPath, label string) (str
 		return "", noop, nil // no config-drive attached — expected outcome
 	}
 
-	if isMounted(mountPath) {
+	if isConfigDriveMounted(mountPath) {
 		l.logger.Debug("config-drive already mounted", zap.String("mount_path", mountPath))
 		return mountPath, noop, nil
 	}
@@ -59,10 +59,25 @@ func (l *linuxLocator) Locate(ctx context.Context, mountPath, label string) (str
 	return mountPath, unmount, nil
 }
 
-// isMounted reports whether mountPath is currently a mount point, per
-// /proc/self/mountinfo.
-func isMounted(mountPath string) bool {
-	f, err := os.Open("/proc/self/mountinfo")
+// isConfigDriveMounted reports whether an iso9660/udf filesystem — i.e. the
+// config-drive itself, not just anything — is mounted at mountPath.
+//
+// It is not enough to check that mountPath merely appears as a mount point:
+// under systemd's ProtectSystem=strict, every ReadWritePaths= entry (which
+// includes the config-drive mount point, so the agent can mount onto it) is
+// implemented as a bind mount of that directory onto itself inside the
+// service's private mount namespace. That self-bind-mount shows up in this
+// process's own /proc/self/mountinfo exactly like a real mount would, with
+// the *host's root filesystem* underneath (e.g. ext4) — so a naive "is
+// something mounted here" check reports true and the locator skips actually
+// mounting the config-drive, silently reading an empty directory instead.
+// Filtering on filesystem type tells the two apart.
+func isConfigDriveMounted(mountPath string) bool {
+	return mountInfoHasConfigDrive("/proc/self/mountinfo", mountPath)
+}
+
+func mountInfoHasConfigDrive(mountInfoPath, mountPath string) bool {
+	f, err := os.Open(mountInfoPath)
 	if err != nil {
 		return false
 	}
@@ -70,9 +85,22 @@ func isMounted(mountPath string) bool {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		// Format: <id> <parent-id> <major:minor> <root> <mount-point> ...
-		if len(fields) > 4 && fields[4] == mountPath {
+		// Format: <id> <parent-id> <major:minor> <root> <mount-point>
+		// <options> <optional-fields...> - <fstype> <source> <super-options>
+		pre, post, ok := strings.Cut(scanner.Text(), " - ")
+		if !ok {
+			continue
+		}
+		preFields := strings.Fields(pre)
+		postFields := strings.Fields(post)
+		if len(preFields) < 5 || len(postFields) < 1 {
+			continue
+		}
+		if preFields[4] != mountPath {
+			continue
+		}
+		switch postFields[0] {
+		case "iso9660", "udf":
 			return true
 		}
 	}

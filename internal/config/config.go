@@ -189,7 +189,11 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("iso.mount_path", "/media/plusclouds-config")
 	v.SetDefault("iso.fallback_env", true)
-	v.SetDefault("iso.label", "plusclouds-config")
+	// "cidata" is the volume label the platform actually builds the
+	// config-drive with (a standard cloud-init NoCloud ISO, carrying
+	// pc-meta-data.json alongside the usual meta-data/user-data) — not
+	// "plusclouds-config", which is only the local mount directory name.
+	v.SetDefault("iso.label", "cidata")
 	v.SetDefault("iso.cache_path", "/var/lib/plusclouds/cache/pc-meta-data.json")
 
 	v.SetDefault("log.level", "info")

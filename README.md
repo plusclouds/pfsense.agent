@@ -168,7 +168,7 @@ chmod 0750 /var/log/plusclouds
 
 #### 3. Attach the config-drive
 
-The platform attaches a config-drive ISO (labelled `plusclouds-config`, containing `pc-meta-data.json`) to the VM during provisioning. The agent mounts it automatically at boot, reads its identity, NATS, and runtime settings from it, and caches a local copy under `/var/lib/plusclouds/cache/` so it keeps working on later boots even if the drive is later detached. There's nothing to deploy manually — if you're running the agent somewhere the config-drive isn't attached (e.g. local testing), see [Configuration reference](#configuration-reference) below for the built-in defaults and environment variable overrides.
+The platform attaches a config-drive ISO (a standard cloud-init NoCloud drive labelled `cidata`, containing `pc-meta-data.json` alongside the usual `meta-data`/`user-data`) to the VM during provisioning. The agent mounts it automatically at boot, reads its identity, NATS, and runtime settings from it, and caches a local copy under `/var/lib/plusclouds/cache/` so it keeps working on later boots even if the drive is later detached. There's nothing to deploy manually — if you're running the agent somewhere the config-drive isn't attached (e.g. local testing), see [Configuration reference](#configuration-reference) below for the built-in defaults and environment variable overrides.
 
 #### 4. Install and start the systemd service
 
