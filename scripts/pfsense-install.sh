@@ -2,9 +2,17 @@
 # Installs (or upgrades) the PlusClouds agent on pfSense (FreeBSD) as an
 # rc.d service, from a GitHub release — no local checkout needed.
 #
-# Usage (paste directly into a pfSense shell):
+# Usage:
+#   # Piped directly (recommended) — the "-s" here is a real sh(1) flag
+#   # meaning "read the script from stdin", NOT part of the version:
 #   fetch -qo - https://raw.githubusercontent.com/plusclouds/pfsense.agent/master/scripts/pfsense-install.sh | sh
-#   fetch -qo - .../scripts/pfsense-install.sh | sh -s v1.2.0   # pin a release
+#   fetch -qo - .../scripts/pfsense-install.sh | sh -s v1.3.0   # pin a release
+#
+#   # Already downloaded the file? Run it directly — no "-s" here, just the
+#   # version as a plain argument (sh pfsense-install.sh -s v1.3.0 is WRONG:
+#   # that passes "-s" itself as the version and 404s):
+#   sh pfsense-install.sh
+#   sh pfsense-install.sh v1.3.0
 #
 # Safe to re-run: upgrades the binary and rc.d script in place. There's no
 # config file to manage — the agent reads all of its runtime configuration
@@ -27,6 +35,13 @@ ISO_MOUNT_DIR="/media/plusclouds-config"
 RC_D_SCRIPT="/usr/local/etc/rc.d/plusclouds-agent"
 RC_CONF_LOCAL="/etc/rc.conf.local"
 VERSION="${1:-${VERSION:-latest}}"
+
+case "$VERSION" in
+	-*) echo "error: version argument '${VERSION}' looks like a flag, not a version." >&2
+	    echo "       If you ran this as 'sh pfsense-install.sh -s v1.3.0', drop the -s:" >&2
+	    echo "       sh pfsense-install.sh v1.3.0" >&2
+	    exit 1 ;;
+esac
 
 log()  { echo "==> $*"; }
 die()  { echo "error: $*" >&2; exit 1; }
