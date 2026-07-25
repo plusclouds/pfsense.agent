@@ -45,11 +45,23 @@ func NewWithTimeout(logger *zap.Logger, timeout time.Duration) *Executor {
 // The command is always invoked directly — never via sh -c — to prevent
 // shell injection.
 func (e *Executor) Execute(ctx context.Context, command string, args ...string) (stdout string, stderr string, err error) {
+	return e.ExecuteWithStdin(ctx, nil, command, args...)
+}
+
+// ExecuteWithStdin behaves like Execute but additionally pipes stdin to the
+// child process. Use this instead of Execute for secrets (passwords, tokens)
+// that must not appear in argv or the environment, where they'd be visible
+// to other users via ps/procfs. stdin content is never written to the audit
+// log — only the command, args, and exit outcome are.
+func (e *Executor) ExecuteWithStdin(ctx context.Context, stdin []byte, command string, args ...string) (stdout string, stderr string, err error) {
 	// Apply timeout: if the context already has a shorter deadline, that wins.
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, command, args...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf

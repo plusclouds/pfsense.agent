@@ -58,6 +58,10 @@ agent:
     - exec
     # - vm.reboot
     # - vm.shutdown
+    # pfSense/FreeBSD only. Changes a local user's password (e.g. admin) via
+    # pfSense's own config/auth subsystem. Credential-changing and high blast
+    # radius if the command channel is ever compromised — enable deliberately.
+    # - pfsense.set_password
 
   # When "exec" is listed above, only these exact binary paths may be invoked.
   # Requests referencing unlisted paths are rejected.

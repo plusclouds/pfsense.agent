@@ -1,0 +1,106 @@
+#!/usr/local/bin/php -f
+<?php
+/*
+ * Applies static IPv4 addressing (and optional gateway/DNS/MTU) to pfSense
+ * interfaces that are already assigned to a physical NIC — this does not
+ * perform interface assignment (wan/lan role selection). The PlusClouds
+ * agent resolves which physical NIC (ifname) each plan entry targets by
+ * matching MAC addresses from provisioning metadata before invoking this
+ * script; interface_configure() brings each changed interface up live so
+ * no reboot is required.
+ *
+ * stdin: JSON {"interfaces":[{"ifname","ipaddr","subnet","gateway","dns":[],"mtu"}]}
+ */
+
+require_once("globals.inc");
+require_once("config.inc");
+require_once("interfaces.inc");
+
+$input = json_decode(stream_get_contents(STDIN), true);
+if (!is_array($input) || !is_array($input['interfaces'] ?? null)) {
+	fwrite(STDERR, "invalid input\n");
+	exit(1);
+}
+
+$results = [];
+$all_dns = [];
+$logicals_to_apply = [];
+
+foreach ($input['interfaces'] as $plan) {
+	$ifname = $plan['ifname'] ?? '';
+	$result = ['ifname' => $ifname, 'applied' => false];
+
+	$logical = null;
+	foreach (config_get_path('interfaces', []) as $name => $cfg) {
+		if (($cfg['if'] ?? null) === $ifname) {
+			$logical = $name;
+			break;
+		}
+	}
+	if ($logical === null) {
+		$result['message'] = "no pfSense interface assigned to {$ifname}";
+		$results[] = $result;
+		continue;
+	}
+
+	config_set_path("interfaces/{$logical}/ipaddr", $plan['ipaddr']);
+	config_set_path("interfaces/{$logical}/subnet", $plan['subnet']);
+
+	if (!empty($plan['mtu'])) {
+		config_set_path("interfaces/{$logical}/mtu", $plan['mtu']);
+	}
+
+	if (!empty($plan['gateway'])) {
+		$gwname = strtoupper($logical) . "_PCGW";
+		$existing_idx = null;
+		foreach (config_get_path('gateways/gateway_item', []) as $idx => $gw) {
+			if (($gw['name'] ?? null) === $gwname) {
+				$existing_idx = $idx;
+				break;
+			}
+		}
+		$gw_item = [
+			'interface'  => $logical,
+			'gateway'    => $plan['gateway'],
+			'name'       => $gwname,
+			'weight'     => 1,
+			'ipprotocol' => 'inet',
+			'descr'      => 'Set by PlusClouds agent from provisioning metadata',
+		];
+		if ($logical === 'wan') {
+			$gw_item['defaultgw'] = true;
+		}
+		if ($existing_idx !== null) {
+			config_set_path("gateways/gateway_item/{$existing_idx}", $gw_item);
+		} else {
+			$next_idx = count(config_get_path('gateways/gateway_item', []));
+			config_set_path("gateways/gateway_item/{$next_idx}", $gw_item);
+		}
+		config_set_path("interfaces/{$logical}/gateway", $gwname);
+	} else {
+		config_del_path("interfaces/{$logical}/gateway");
+	}
+
+	foreach (($plan['dns'] ?? []) as $dns) {
+		if (!empty($dns) && !in_array($dns, $all_dns, true)) {
+			$all_dns[] = $dns;
+		}
+	}
+
+	$logicals_to_apply[] = $logical;
+	$result['logical'] = $logical;
+	$result['applied'] = true;
+	$results[] = $result;
+}
+
+if (!empty($all_dns)) {
+	config_set_path('system/dnsserver', $all_dns);
+}
+
+write_config("Network settings applied via PlusClouds agent from provisioning metadata");
+
+foreach (array_unique($logicals_to_apply) as $logical) {
+	interface_configure($logical, true);
+}
+
+echo json_encode(['status' => 'ok', 'interfaces' => $results]);

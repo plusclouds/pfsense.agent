@@ -1,7 +1,8 @@
 // Package isoconfig reads VM metadata from the PlusClouds config-drive ISO.
 // The ISO is mounted (typically at /media/plusclouds-config) and contains a
-// single YAML file named metadata.yaml with VM identity, network, disk, and
-// service role information. A JSON fallback (metadata.json) is also supported.
+// JSON file named pc-meta-data.json with VM identity, network, disk, and
+// service role information. metadata.yaml/metadata.json are also supported
+// as legacy fallback names.
 package isoconfig
 
 import (
@@ -19,17 +20,18 @@ import (
 // ---------------------------------------------------------------------------
 
 // VirtualMachineMetadata is the top-level structure of the ISO config-drive
-// metadata file (metadata.yaml / metadata.json).
+// metadata file (pc-meta-data.json, with metadata.yaml/metadata.json as
+// legacy fallback names).
 type VirtualMachineMetadata struct {
-	Hostname            string                       `yaml:"hostname"             json:"hostname"`
-	Username            string                       `yaml:"username"             json:"username"`
-	Password            string                       `yaml:"password"             json:"password"`
-	AgentAPIKey         string                       `yaml:"agent_api_key"        json:"agent_api_key"`
-	VirtualMachineID    string                       `yaml:"virtual_machine_id"   json:"virtual_machine_id"`
-	VirtualDisks        DataList[VirtualDisk]        `yaml:"virtualDisks"         json:"virtualDisks"`
-	VirtualNetworkCards DataList[VirtualNetworkCard] `yaml:"virtualNetworkCards"  json:"virtualNetworkCards"`
-	ServiceRoles        DataList[ServiceRole]        `yaml:"serviceRoles"         json:"serviceRoles"`
-	SSHPublicKeys       []string                     `yaml:"SSHPublicKeys"        json:"SSHPublicKeys"`
+	Hostname            string               `yaml:"hostname"              json:"hostname"`
+	Username            string               `yaml:"username"              json:"username"`
+	Password            string               `yaml:"password"              json:"password"`
+	AgentAPIKey         string               `yaml:"agent_api_key"         json:"agent_api_key"`
+	VirtualMachineID    string               `yaml:"virtual_machine_id"    json:"virtual_machine_id"`
+	VirtualDisks        []VirtualDisk        `yaml:"virtual_disks"         json:"virtual_disks"`
+	VirtualNetworkCards []VirtualNetworkCard `yaml:"virtual_network_cards" json:"virtual_network_cards"`
+	ServiceRoles        []ServiceRole        `yaml:"service_roles"         json:"service_roles"`
+	SSHPublicKeys       []string             `yaml:"ssh_keys"              json:"ssh_keys"`
 }
 
 // DataList is the generic wrapper used throughout the metadata for lists.
@@ -47,15 +49,10 @@ type VirtualDisk struct {
 
 // VirtualNetworkCard describes one virtual NIC attached to the VM.
 type VirtualNetworkCard struct {
-	DeviceNumber int                  `yaml:"device_number" json:"device_number"`
-	MACAddr      string               `yaml:"mac_addr"      json:"mac_addr"`
-	Network      DataWrapper[Network] `yaml:"network"       json:"network"`
-	IPList       DataList[IPEntry]    `yaml:"ipList"        json:"ipList"`
-}
-
-// DataWrapper wraps a single object under a "data" key.
-type DataWrapper[T any] struct {
-	Data T `yaml:"data" json:"data"`
+	DeviceNumber int               `yaml:"device_number" json:"device_number"`
+	MACAddr      string            `yaml:"mac_addr"      json:"mac_addr"`
+	Network      Network           `yaml:"network"       json:"network"`
+	IPList       DataList[IPEntry] `yaml:"ip_list"        json:"ip_list"`
 }
 
 // Network holds the network configuration for a NIC's subnet.
@@ -74,10 +71,9 @@ type Network struct {
 
 // IPEntry is an IP address assignment on a NIC.
 type IPEntry struct {
-	ID          string  `yaml:"id"           json:"id"`
-	IPAddr      string  `yaml:"ip_addr"      json:"ip_addr"`
-	Version     *string `yaml:"version"      json:"version"`
-	IsReachable *bool   `yaml:"is_reachable" json:"is_reachable"`
+	ID         int    `yaml:"id"          json:"id"`
+	IPAddr     string `yaml:"ip_addr"     json:"ip_addr"`
+	IsReserved bool   `yaml:"is_reserved" json:"is_reserved"`
 }
 
 // ServiceRole describes a service role assigned to the VM by the orchestrator.
@@ -173,7 +169,7 @@ func (m *ISOMetadata) PrimaryIP() string {
 	if m == nil || m.raw == nil {
 		return ""
 	}
-	for _, nic := range m.raw.VirtualNetworkCards.Data {
+	for _, nic := range m.raw.VirtualNetworkCards {
 		if len(nic.IPList.Data) > 0 {
 			return nic.IPList.Data[0].IPAddr
 		}
@@ -187,9 +183,9 @@ func (m *ISOMetadata) Gateway() string {
 	if m == nil || m.raw == nil {
 		return ""
 	}
-	for _, nic := range m.raw.VirtualNetworkCards.Data {
-		if nic.Network.Data.Gateway != nil {
-			return *nic.Network.Data.Gateway
+	for _, nic := range m.raw.VirtualNetworkCards {
+		if nic.Network.Gateway != nil {
+			return *nic.Network.Gateway
 		}
 	}
 	return ""
@@ -200,12 +196,21 @@ func (m *ISOMetadata) DNSNameservers() []string {
 	if m == nil || m.raw == nil {
 		return nil
 	}
-	for _, nic := range m.raw.VirtualNetworkCards.Data {
-		if len(nic.Network.Data.DNSNameservers) > 0 {
-			return nic.Network.Data.DNSNameservers
+	for _, nic := range m.raw.VirtualNetworkCards {
+		if len(nic.Network.DNSNameservers) > 0 {
+			return nic.Network.DNSNameservers
 		}
 	}
 	return nil
+}
+
+// NetworkCards returns all virtual NICs from the metadata, or nil if the
+// ISO wasn't mounted or carried no NICs.
+func (m *ISOMetadata) NetworkCards() []VirtualNetworkCard {
+	if m == nil || m.raw == nil {
+		return nil
+	}
+	return m.raw.VirtualNetworkCards
 }
 
 // Tags returns an empty map. Tags are not present in the current metadata
@@ -227,9 +232,10 @@ func NewReader(mountPath string) *Reader {
 }
 
 // Read parses the metadata file from the ISO mount point and returns an
-// ISOMetadata. It tries metadata.yaml first, then metadata.json as a fallback.
-// If neither file is present the returned ISOMetadata is non-nil but empty
-// (all accessors will return zero values).
+// ISOMetadata. It tries metadata.yaml, then metadata.json, then
+// pc-meta-data.json (the real filename used by the platform) in order.
+// If none are present the returned ISOMetadata is non-nil but empty (all
+// accessors will return zero values).
 func (r *Reader) Read() (*ISOMetadata, error) {
 	// Try YAML first.
 	yamlPath := filepath.Join(r.mountPath, "metadata.yaml")
@@ -243,18 +249,23 @@ func (r *Reader) Read() (*ISOMetadata, error) {
 		return nil, fmt.Errorf("reading metadata.yaml: %w", err)
 	}
 
-	// Try JSON fallback.
-	jsonPath := filepath.Join(r.mountPath, "metadata.json")
-	if data, err := os.ReadFile(jsonPath); err == nil {
+	// Try JSON fallback names.
+	for _, name := range []string{"metadata.json", "pc-meta-data.json"} {
+		jsonPath := filepath.Join(r.mountPath, name)
+		data, err := os.ReadFile(jsonPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("reading %s: %w", name, err)
+		}
 		var vm VirtualMachineMetadata
 		if err := json.Unmarshal(data, &vm); err != nil {
-			return nil, fmt.Errorf("parsing metadata.json: %w", err)
+			return nil, fmt.Errorf("parsing %s: %w", name, err)
 		}
 		return &ISOMetadata{raw: &vm}, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("reading metadata.json: %w", err)
 	}
 
-	// Neither file present — return empty metadata (local-only / dev mode).
+	// No metadata file present — return empty metadata (local-only / dev mode).
 	return &ISOMetadata{}, nil
 }

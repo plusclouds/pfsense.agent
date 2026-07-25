@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -18,6 +19,7 @@ import (
 	"github.com/plusclouds/ubuntu-agent/internal/config"
 	"github.com/plusclouds/ubuntu-agent/internal/dispatcher"
 	"github.com/plusclouds/ubuntu-agent/internal/executor"
+	"github.com/plusclouds/ubuntu-agent/internal/modules/pfsense"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/system"
 	natsclient "github.com/plusclouds/ubuntu-agent/internal/nats"
 	"github.com/plusclouds/ubuntu-agent/internal/protocol"
@@ -112,12 +114,22 @@ func run(_ *cobra.Command, _ []string) error {
 	// ------------------------------------------------------------------ //
 	sysMod := system.New(iso)
 	exec := executor.New(logger)
+	pfsMod := pfsense.New(exec, logger)
 	logger.Info("modules initialised",
 		zap.Int("allowed_operations", len(cfg.Agent.AllowedOperations)),
 		zap.Int("allowed_commands", len(cfg.Agent.AllowedCommands)),
 		zap.Duration("telemetry_interval", cfg.Agent.TelemetryInterval),
 		zap.Duration("heartbeat_interval", cfg.Agent.HeartbeatInterval),
 	)
+
+	// ------------------------------------------------------------------ //
+	// 5b. One-shot boot provisioning from ISO metadata (pfSense only).
+	// Applies static network config and the provisioned password at most
+	// once; failures are logged and retried on the next boot, never fatal.
+	// ------------------------------------------------------------------ //
+	if runtime.GOOS == "freebsd" {
+		runBootProvisioning(ctx, cfg, iso, agentUUID, agentAPIKey, pfsMod, logger)
+	}
 
 	// ------------------------------------------------------------------ //
 	// 6. Connect to NATS
@@ -134,7 +146,7 @@ func run(_ *cobra.Command, _ []string) error {
 	pub := publisher.New(nc, sysMod, agentUUID, cfg.Agent, logger)
 
 	disp := dispatcher.New(
-		sysMod, svcMgr, exec, pub,
+		sysMod, svcMgr, pfsMod, exec, pub,
 		agentUUID,
 		cfg.Agent.AllowedOperations,
 		cfg.Agent.AllowedCommands,
@@ -192,6 +204,129 @@ func run(_ *cobra.Command, _ []string) error {
 	cancel()
 	logger.Info("agent stopped cleanly")
 	return nil
+}
+
+// netconfigMarkerPath and passwordMarkerPath mark completed one-shot boot
+// provisioning steps. /var/db is persistent storage on a Full-Install
+// pfSense (NanoBSD is no longer supported as of pfSense 2.6+).
+const (
+	netconfigMarkerPath = "/var/db/plusclouds-agent/netconfig.applied"
+	passwordMarkerPath  = "/var/db/plusclouds-agent/password-set.applied"
+)
+
+// runBootProvisioning applies one-shot, metadata-driven network and password
+// provisioning. The two steps are independent: one failing/reverting must
+// not block the other, and each retries on the next boot until it succeeds.
+func runBootProvisioning(ctx context.Context, cfg *config.Config, iso *isoconfig.ISOMetadata, agentUUID, agentAPIKey string, pfsMod pfsense.Manager, logger *zap.Logger) {
+	applyBootNetworkConfig(ctx, cfg, iso, agentUUID, agentAPIKey, pfsMod, logger)
+	applyBootPassword(ctx, iso, pfsMod, logger)
+}
+
+// applyBootNetworkConfig sets static addressing on already-assigned pfSense
+// interfaces from the ISO metadata, then verifies the change by attempting a
+// real (short, non-retrying) NATS connect — if the platform can't be reached
+// afterward, it reverts to the pre-change snapshot so the box stays
+// reachable and retries on the next boot. Only a verified-successful apply
+// is marked done.
+func applyBootNetworkConfig(ctx context.Context, cfg *config.Config, iso *isoconfig.ISOMetadata, agentUUID, agentAPIKey string, pfsMod pfsense.Manager, logger *zap.Logger) {
+	if _, err := os.Stat(netconfigMarkerPath); err == nil {
+		return
+	}
+
+	cards := iso.NetworkCards()
+	if len(cards) == 0 {
+		return
+	}
+
+	result, err := pfsMod.ApplyBootNetworkConfig(ctx, cards)
+	if err != nil {
+		logger.Error("boot network config: apply failed", zap.Error(err))
+		return
+	}
+	if result == nil {
+		return
+	}
+	for _, r := range result.Interfaces {
+		logger.Info("boot network config: interface result",
+			zap.String("mac_addr", r.MACAddr),
+			zap.String("ifname", r.IfName),
+			zap.String("logical", r.Logical),
+			zap.Bool("applied", r.Applied),
+			zap.String("message", r.Message),
+		)
+	}
+
+	// Verification probe: a real NATS connect with no reconnect retries, on
+	// whatever network config is now live. Not the normal, infinite-retry
+	// connect used in step 6 — this one is only here to prove reachability.
+	probeCfg := cfg.NATS
+	probeCfg.MaxReconnects = 0
+	nc, probeErr := natsclient.Connect(probeCfg, agentUUID, agentAPIKey, logger)
+	if probeErr == nil {
+		nc.Drain()
+	}
+
+	if probeErr != nil {
+		logger.Warn("boot network config: platform unreachable after apply — reverting",
+			zap.Error(probeErr))
+		if len(result.Snapshot) == 0 {
+			logger.Error("boot network config: no snapshot to revert to")
+			return
+		}
+		if err := pfsMod.Revert(ctx, result.Snapshot); err != nil {
+			logger.Error("boot network config: revert failed", zap.Error(err))
+			return
+		}
+		logger.Warn("boot network config: reverted to pre-boot config, will retry next boot")
+		return
+	}
+
+	if err := writeMarker(netconfigMarkerPath); err != nil {
+		logger.Error("boot network config: could not write marker file", zap.Error(err))
+		return
+	}
+	logger.Info("boot network config: applied and verified")
+}
+
+// applyBootPassword sets the pfSense local user's password from the ISO
+// metadata. Unlike network config this carries no NATS-reachability risk
+// (a local OS/config change, not a network change), so it's a simple
+// idempotent retry-until-success with no verification probe or revert.
+func applyBootPassword(ctx context.Context, iso *isoconfig.ISOMetadata, pfsMod pfsense.Manager, logger *zap.Logger) {
+	if _, err := os.Stat(passwordMarkerPath); err == nil {
+		return
+	}
+
+	username, password := iso.Username(), iso.Password()
+	if username == "" || password == "" {
+		return
+	}
+
+	result, err := pfsMod.SetPassword(ctx, username, password)
+	if err != nil {
+		logger.Error("boot password provisioning: failed", zap.Error(err))
+		return
+	}
+	if !result.Success {
+		logger.Warn("boot password provisioning: not applied, will retry next boot",
+			zap.String("username", username),
+			zap.String("message", result.Message),
+		)
+		return
+	}
+
+	if err := writeMarker(passwordMarkerPath); err != nil {
+		logger.Error("boot password provisioning: could not write marker file", zap.Error(err))
+		return
+	}
+	logger.Info("boot password provisioning: applied", zap.String("username", username))
+}
+
+func writeMarker(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, nil, 0600)
 }
 
 func buildLogger(cfg *config.Config) (*zap.Logger, error) {

@@ -4,6 +4,8 @@ BINARY_AGENT   := plusclouds-agent
 BINARY_CTL     := plsctl
 BINARY_LINUX   := plusclouds.linux
 BINARY_WINDOWS := plusclouds.windows
+BINARY_FREEBSD       := plusclouds.freebsd
+BINARY_FREEBSD_ARM64 := plusclouds.freebsd-arm64
 CMD_AGENT      := ./cmd/agent
 CMD_CTL        := ./cmd/ctl
 BUILD_DIR      := ./bin
@@ -22,7 +24,7 @@ SERVICE_DIR    := /etc/systemd/system
 CONFIG_DIR     := /etc/plusclouds
 LOG_DIR        := /var/log/plusclouds
 
-.PHONY: all build build-agent build-ctl build-prod build-linux build-windows build-all test lint clean install uninstall package-deb help
+.PHONY: all build build-agent build-ctl build-prod build-linux build-windows build-freebsd build-freebsd-arm64 build-all test lint clean install uninstall package-deb help
 
 ## all: build both binaries (development)
 all: build
@@ -68,8 +70,28 @@ build-windows:
 	@echo "Done: $(BUILD_DIR)/$(BINARY_WINDOWS)"
 	@echo "Size: $$(du -sh $(BUILD_DIR)/$(BINARY_WINDOWS) | cut -f1)"
 
+## build-freebsd: build production binary for pfSense/FreeBSD amd64 → bin/plusclouds.freebsd
+build-freebsd:
+	@echo "Building $(BINARY_FREEBSD) $(VERSION) (freebsd/amd64)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 \
+		go build -trimpath $(LDFLAGS_PROD) \
+		-o $(BUILD_DIR)/$(BINARY_FREEBSD) $(CMD_AGENT)
+	@echo "Done: $(BUILD_DIR)/$(BINARY_FREEBSD)"
+	@echo "Size: $$(du -sh $(BUILD_DIR)/$(BINARY_FREEBSD) | cut -f1)"
+
+## build-freebsd-arm64: build production binary for pfSense/FreeBSD arm64 (e.g. Netgate 1100/2100) → bin/plusclouds.freebsd-arm64
+build-freebsd-arm64:
+	@echo "Building $(BINARY_FREEBSD_ARM64) $(VERSION) (freebsd/arm64)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=arm64 \
+		go build -trimpath $(LDFLAGS_PROD) \
+		-o $(BUILD_DIR)/$(BINARY_FREEBSD_ARM64) $(CMD_AGENT)
+	@echo "Done: $(BUILD_DIR)/$(BINARY_FREEBSD_ARM64)"
+	@echo "Size: $$(du -sh $(BUILD_DIR)/$(BINARY_FREEBSD_ARM64) | cut -f1)"
+
 ## build-all: build production binaries for all platforms
-build-all: build-linux build-windows
+build-all: build-linux build-windows build-freebsd build-freebsd-arm64
 	@echo ""
 	@echo "All platform binaries:"
 	@ls -lh $(BUILD_DIR)/plusclouds.*

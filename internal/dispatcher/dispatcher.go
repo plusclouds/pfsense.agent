@@ -17,16 +17,25 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/plusclouds/ubuntu-agent/internal/executor"
+	"github.com/plusclouds/ubuntu-agent/internal/modules/pfsense"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/services"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/system"
 	"github.com/plusclouds/ubuntu-agent/internal/protocol"
 	"github.com/plusclouds/ubuntu-agent/internal/publisher"
 )
 
+// sensitiveOperations lists operations whose params contain secrets that
+// must never reach the debug log, even redacted-in-part — the whole params
+// blob is replaced with a placeholder for these.
+var sensitiveOperations = map[string]bool{
+	"pfsense.set_password": true,
+}
+
 // Dispatcher routes command envelopes to the appropriate module method.
 type Dispatcher struct {
 	sys             *system.Module
 	svc             services.Manager
+	pfs             pfsense.Manager
 	exec            *executor.Executor
 	pub             *publisher.Publisher
 	allowedOps      map[string]bool
@@ -39,6 +48,7 @@ type Dispatcher struct {
 func New(
 	sys *system.Module,
 	svc services.Manager,
+	pfs pfsense.Manager,
 	exec *executor.Executor,
 	pub *publisher.Publisher,
 	agentUUID string,
@@ -53,6 +63,7 @@ func New(
 	return &Dispatcher{
 		sys:             sys,
 		svc:             svc,
+		pfs:             pfs,
 		exec:            exec,
 		pub:             pub,
 		allowedOps:      ops,
@@ -64,10 +75,12 @@ func New(
 
 // params is the common command params shape. Fields are optional depending on operation.
 type params struct {
-	Name       string   `json:"name"`
-	Command    string   `json:"command"`
-	Args       []string `json:"args"`
-	IntervalS  int      `json:"interval_s"`
+	Name      string   `json:"name"`
+	Command   string   `json:"command"`
+	Args      []string `json:"args"`
+	IntervalS int      `json:"interval_s"`
+	Username  string   `json:"username"`
+	Password  string   `json:"password"`
 }
 
 // Dispatch handles a single command envelope and returns the result envelope.
@@ -90,11 +103,19 @@ func (d *Dispatcher) Dispatch(ctx context.Context, env protocol.Envelope) protoc
 		zap.String("command_id", env.ID),
 		zap.String("operation", op),
 	)
-	d.logger.Debug("→ command params",
-		zap.String("command_id", env.ID),
-		zap.String("operation", op),
-		zap.ByteString("params", cmd.Params),
-	)
+	if sensitiveOperations[op] {
+		d.logger.Debug("→ command params",
+			zap.String("command_id", env.ID),
+			zap.String("operation", op),
+			zap.String("params", "[REDACTED]"),
+		)
+	} else {
+		d.logger.Debug("→ command params",
+			zap.String("command_id", env.ID),
+			zap.String("operation", op),
+			zap.ByteString("params", cmd.Params),
+		)
+	}
 
 	if !d.allowedOps[op] {
 		result := d.reject(env, fmt.Sprintf("operation %q is not permitted on this agent", op))
@@ -256,6 +277,10 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) 
 			"requested_interval_s": p.IntervalS,
 			"applied_interval_s":   int(applied.Seconds()),
 		}, nil
+
+	// ---- pfsense --------------------------------------------------------
+	case "pfsense.set_password":
+		return d.pfs.SetPassword(ctx, p.Username, p.Password)
 
 	// ---- exec ---------------------------------------------------------
 	case "exec":

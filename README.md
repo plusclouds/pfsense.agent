@@ -119,6 +119,7 @@ The agent announces its available operations on boot via a `capabilities` event.
 | `vm.reboot` | Reboot the machine | — |
 | `vm.shutdown` | Shut down the machine | — |
 | `exec` | Run an allowed binary | `command` (string), `args` (array) |
+| `pfsense.set_password` | Change a local pfSense user's password (pfSense/FreeBSD only) | `username` (string), `password` (string, sensitive) |
 
 All operations are opt-in. Remove any entry from `allowed_operations` in `agent.yaml` and the platform receives a `rejected` result instead of executing it.
 
@@ -274,17 +275,32 @@ bin/plusclouds.windows  — PE32+, ~12 MB
 
 ---
 
+## Boot-time provisioning from ISO metadata (pfSense)
+
+On pfSense/FreeBSD, the agent applies two pieces of config from the ISO config-drive metadata (`pc-meta-data.json`) automatically on boot — **not** via a NATS command, since NATS itself is only reachable once the network config is correct. Each step runs at most once, tracked by its own marker file, and retries on the next boot until it succeeds:
+
+| Step | Marker | Behavior |
+|---|---|---|
+| Network config | `/var/db/plusclouds-agent/netconfig.applied` | Matches each metadata NIC to a local interface by MAC address and sets static IP/subnet/gateway/DNS/MTU on interfaces that are **already assigned** in the base image (wan/lan/optN role assignment is out of scope). Snapshots the live config first; after applying, attempts a real, non-retrying NATS connect as a verification probe. If the platform can't be reached, it **reverts** to the snapshot and leaves the marker unset so it retries next boot — only a verified-successful apply is marked done. |
+| Password | `/var/db/plusclouds-agent/password-set.applied` | Sets the `username`/`password` from the metadata as the matching local pfSense user's login password, via the same `pfsense.set_password` machinery available as a NATS command. No reachability risk, so no revert — just retried each boot until it succeeds. |
+
+The two steps are independent — a reverted network change does not block password provisioning, and vice versa. A NIC whose `network.gateway` is `null` in the metadata gets its static IP/subnet set with no gateway/default route configured — the agent never guesses a route.
+
+---
+
 ## Platform compatibility
 
-| Feature | Linux | Windows |
-|---|---|---|
-| NATS connection | ✅ | ✅ |
-| Telemetry (CPU, RAM, disk, network) | ✅ | ✅ (load_avg = 0) |
-| Heartbeat | ✅ | ✅ |
-| Capabilities event | ✅ | ✅ |
-| Service management | ✅ systemd/D-Bus | ⚙ stub (SCM planned) |
-| `system.update` | ✅ Ubuntu/Debian | ✗ |
-| `vm.reboot` / `vm.shutdown` | ✅ `systemctl` | ✅ `shutdown /r` |
+| Feature | Linux | Windows | FreeBSD (pfSense) |
+|---|---|---|---|
+| NATS connection | ✅ | ✅ | ✅ |
+| Telemetry (CPU, RAM, disk, network) | ✅ | ✅ (load_avg = 0) | ✅ (gopsutil) |
+| Heartbeat | ✅ | ✅ | ✅ |
+| Capabilities event | ✅ | ✅ | ✅ |
+| Service management | ✅ systemd/D-Bus | ⚙ stub (SCM planned) | ⚙ stub (rc.d planned) |
+| `system.update` | ✅ Ubuntu/Debian | ✗ | ✗ |
+| `vm.reboot` / `vm.shutdown` | ✅ `systemctl` | ✅ `shutdown /r` | ✗ (uses `systemctl`, not yet FreeBSD-aware) |
+| `pfsense.set_password` | ✗ | ✗ | ✅ pfSense config/auth subsystem |
+| Boot-time metadata provisioning (network + password) | ✗ | ✗ | ✅ one-shot, see below |
 
 ---
 

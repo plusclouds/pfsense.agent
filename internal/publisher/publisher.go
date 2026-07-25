@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/plusclouds/ubuntu-agent/internal/config"
-	natsclient "github.com/plusclouds/ubuntu-agent/internal/nats"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/system"
+	natsclient "github.com/plusclouds/ubuntu-agent/internal/nats"
 	"github.com/plusclouds/ubuntu-agent/internal/protocol"
 )
 
@@ -240,6 +240,14 @@ var operationCatalog = map[string]protocol.OperationSchema{
 	"vm.shutdown": {
 		Operation:   "vm.shutdown",
 		Description: "Shut down the machine immediately.",
+	},
+	"pfsense.set_password": {
+		Operation:   "pfsense.set_password",
+		Description: "Change the password of an existing local pfSense user via pfSense's own config/auth subsystem. pfSense/FreeBSD only.",
+		Params: []protocol.OperationParam{
+			{Name: "username", Type: "string", Required: true, Description: "Existing pfSense local user (e.g. admin)."},
+			{Name: "password", Type: "string", Required: true, Sensitive: true, Description: "New password."},
+		},
 	},
 	"exec": {
 		Operation:   "exec",
