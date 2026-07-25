@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/plusclouds/ubuntu-agent/internal/executor"
+	"github.com/plusclouds/ubuntu-agent/internal/modules/diskresize"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/services"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/system"
 	"github.com/plusclouds/ubuntu-agent/internal/protocol"
@@ -28,6 +29,7 @@ type Dispatcher struct {
 	sys             *system.Module
 	svc             services.Manager
 	exec            *executor.Executor
+	resize          diskresize.Resizer
 	pub             *publisher.Publisher
 	allowedOps      map[string]bool
 	allowedCommands []string
@@ -40,6 +42,7 @@ func New(
 	sys *system.Module,
 	svc services.Manager,
 	exec *executor.Executor,
+	resize diskresize.Resizer,
 	pub *publisher.Publisher,
 	agentUUID string,
 	allowedOps []string,
@@ -54,6 +57,7 @@ func New(
 		sys:             sys,
 		svc:             svc,
 		exec:            exec,
+		resize:          resize,
 		pub:             pub,
 		allowedOps:      ops,
 		allowedCommands: allowedCommands,
@@ -183,6 +187,18 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) 
 		return d.svc.Enable(ctx, p.Name)
 	case "services.disable":
 		return d.svc.Disable(ctx, p.Name)
+
+	// ---- disk -----------------------------------------------------------
+	case "disk.resize":
+		target := p.Name
+		if target == "" {
+			if runtime.GOOS == "windows" {
+				target = "C"
+			} else {
+				target = "/"
+			}
+		}
+		return d.resize.Resize(ctx, target)
 
 	// ---- vm -----------------------------------------------------------
 	case "vm.reboot":

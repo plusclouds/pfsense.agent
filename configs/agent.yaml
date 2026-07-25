@@ -58,6 +58,7 @@ agent:
     - exec
     # - vm.reboot
     # - vm.shutdown
+    # - disk.resize
 
   # When "exec" is listed above, only these exact binary paths may be invoked.
   # Requests referencing unlisted paths are rejected.

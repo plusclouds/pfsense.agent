@@ -18,6 +18,7 @@ import (
 	"github.com/plusclouds/ubuntu-agent/internal/config"
 	"github.com/plusclouds/ubuntu-agent/internal/dispatcher"
 	"github.com/plusclouds/ubuntu-agent/internal/executor"
+	"github.com/plusclouds/ubuntu-agent/internal/modules/diskresize"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/system"
 	natsclient "github.com/plusclouds/ubuntu-agent/internal/nats"
 	"github.com/plusclouds/ubuntu-agent/internal/protocol"
@@ -112,6 +113,7 @@ func run(_ *cobra.Command, _ []string) error {
 	// ------------------------------------------------------------------ //
 	sysMod := system.New(iso)
 	exec := executor.New(logger)
+	resizer := diskresize.New(exec, logger)
 	logger.Info("modules initialised",
 		zap.Int("allowed_operations", len(cfg.Agent.AllowedOperations)),
 		zap.Int("allowed_commands", len(cfg.Agent.AllowedCommands)),
@@ -134,7 +136,7 @@ func run(_ *cobra.Command, _ []string) error {
 	pub := publisher.New(nc, sysMod, agentUUID, cfg.Agent, logger)
 
 	disp := dispatcher.New(
-		sysMod, svcMgr, exec, pub,
+		sysMod, svcMgr, exec, resizer, pub,
 		agentUUID,
 		cfg.Agent.AllowedOperations,
 		cfg.Agent.AllowedCommands,
