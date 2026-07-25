@@ -85,6 +85,14 @@ type ISOConfig struct {
 	// FallbackEnv enables falling back to environment variables when ISO files
 	// are absent. Useful for development and testing without a real ISO.
 	FallbackEnv bool `mapstructure:"fallback_env"`
+	// Label is the volume label the config-drive ISO is built with, used to
+	// find it under /dev/disk/by-label (Linux) or by FileSystemLabel
+	// (Windows) before mounting it.
+	Label string `mapstructure:"label"`
+	// CachePath is where the agent stores a local copy of pc-meta-data.json
+	// after reading it from the config-drive, so identity/metadata survive
+	// later boots where the config-drive isn't attached.
+	CachePath string `mapstructure:"cache_path"`
 }
 
 // LogConfig holds logging settings.
@@ -180,6 +188,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("iso.mount_path", "/media/plusclouds-config")
 	v.SetDefault("iso.fallback_env", true)
+	v.SetDefault("iso.label", "plusclouds-config")
+	v.SetDefault("iso.cache_path", "/var/lib/plusclouds/cache/pc-meta-data.json")
 
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")

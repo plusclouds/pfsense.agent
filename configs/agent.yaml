@@ -69,10 +69,21 @@ agent:
     - /usr/bin/ls
 
 iso:
-  # Mount path checked at startup. In production the ISO is unmounted before
-  # the agent starts, so this is a silent best-effort check. If the ISO is
-  # present and carries a vm_id, it overrides the values above.
+  # Mount path used when the agent mounts the config-drive itself. If it's
+  # already mounted here (e.g. by cloud-init) the agent uses it as-is.
   mount_path: /media/plusclouds-config
+
+  # Volume label the config-drive ISO is built with (see genisoimage -V in
+  # the provisioning docs). Used to find the device under /dev/disk/by-label
+  # (Linux) or by FileSystemLabel (Windows) before mounting.
+  label: plusclouds-config
+
+  # Local cache of pc-meta-data.json, refreshed every time the config-drive
+  # is found and read. If the config-drive isn't attached on a later boot
+  # (it's typically detached after first provisioning), the agent falls
+  # back to this cached copy instead of losing its identity. Contains a
+  # plaintext password and the NATS agent_api_key — kept at 0600.
+  cache_path: /var/lib/plusclouds/cache/pc-meta-data.json
 
 log:
   # Log level: debug, info, warn, error

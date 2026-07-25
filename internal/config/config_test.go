@@ -41,6 +41,12 @@ func TestLoad_Defaults(t *testing.T) {
 	if !cfg.ISO.FallbackEnv {
 		t.Error("ISO fallback_env should default to true")
 	}
+	if cfg.ISO.Label != "plusclouds-config" {
+		t.Errorf("ISO label default: got %q, want plusclouds-config", cfg.ISO.Label)
+	}
+	if cfg.ISO.CachePath != "/var/lib/plusclouds/cache/pc-meta-data.json" {
+		t.Errorf("ISO cache_path default: got %q", cfg.ISO.CachePath)
+	}
 	if cfg.Log.Level != "info" {
 		t.Errorf("log level default: got %q, want info", cfg.Log.Level)
 	}
