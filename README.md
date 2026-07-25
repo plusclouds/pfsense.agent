@@ -4,7 +4,7 @@
 
 The PlusClouds VM Agent is a lightweight, production-grade daemon that turns any Linux or Windows machine into an intelligent infrastructure node. It connects to the PlusClouds platform over NATS, streams real-time telemetry, executes remote commands, and announces its own capabilities — so your platform always knows exactly what each machine can do.
 
-No REST API. No open ports. No certificates to manage. Just a single binary, a config file, and a secure WebSocket connection to the platform.
+No REST API. No open ports. No certificates to manage. No config file, either — the agent reads its entire runtime configuration (identity, NATS connection, allowed operations, logging, autoheal) from the config-drive ISO the platform attaches at provisioning time, and caches a local copy so it keeps working on later boots even if the drive is detached.
 
 ---
 
@@ -31,7 +31,7 @@ agent.vm.{uuid}.evt   →  agent sends telemetry, heartbeat, capabilities, resul
 vm.{uuid}.telemetry   →  client-facing telemetry stream (VM_TELEMETRY JetStream, 15-min retention)
 ```
 
-Authentication uses the `agent_api_key` from `agent.yaml` (written by the platform during provisioning). The NATS auth callout validates every connection against the platform database and issues a scoped JWT — no static passwords, no shared secrets.
+Authentication uses the `agent_api_key` from the config-drive's `pc-meta-data.json` (written by the platform during provisioning). The NATS auth callout validates every connection against the platform database and issues a scoped JWT — no static passwords, no shared secrets.
 
 ### Message envelope
 
@@ -120,7 +120,7 @@ The agent announces its available operations on boot via a `capabilities` event.
 | `vm.shutdown` | Shut down the machine | — |
 | `exec` | Run an allowed binary | `command` (string), `args` (array) |
 
-All operations are opt-in. Remove any entry from `allowed_operations` in `agent.yaml` and the platform receives a `rejected` result instead of executing it.
+All operations are opt-in. Remove any entry from `allowed_operations` in the config-drive's `agent` settings and the platform receives a `rejected` result instead of executing it.
 
 ---
 
@@ -137,28 +137,16 @@ chmod +x /usr/local/bin/plusclouds-agent
 # Copy bin/plusclouds.windows to the target machine and run it as a service
 ```
 
-### 2. Create the config directory
+### 2. Create the runtime directories
 
 ```bash
-mkdir -p /etc/plusclouds /var/log/plusclouds
+mkdir -p /var/log/plusclouds /var/lib/plusclouds/cache
 chmod 0750 /var/log/plusclouds
 ```
 
-### 3. Deploy the config
+### 3. Attach the config-drive
 
-```bash
-scp configs/agent.yaml root@<server-ip>:/etc/plusclouds/agent.yaml
-```
-
-Edit `/etc/plusclouds/agent.yaml` and set the identity fields for this machine (written automatically during VM provisioning):
-
-```yaml
-nats:
-  connection_type: websocket           # "nats" or "websocket"
-  websocket_url: wss://nats.plusclouds.com:443
-  agent_uuid: "<vm-uuid>"             # from iaas_virtual_machines
-  api_key:     "<agent-api-key>"      # from iaas_virtual_machines.events_token
-```
+The platform attaches a config-drive ISO (labelled `plusclouds-config`, containing `pc-meta-data.json`) to the VM during provisioning. The agent mounts it automatically at boot, reads its identity, NATS, and runtime settings from it, and caches a local copy under `/var/lib/plusclouds/cache/` so it keeps working on later boots even if the drive is later detached. There's nothing to deploy manually — if you're running the agent somewhere the config-drive isn't attached (e.g. local testing), see [Configuration reference](#configuration-reference) below for the built-in defaults and environment variable overrides.
 
 ### 4. Install and start the systemd service
 
@@ -189,59 +177,62 @@ telemetry published
 
 ## Configuration reference
 
-```yaml
-nats:
-  connection_type: websocket           # nats | websocket (ws:// needs no certificates)
-  url: nats://nats.plusclouds.com:4222
-  websocket_url: wss://nats.plusclouds.com:443
-  agent_uuid: ""                       # VM UUID — set by provisioning
-  api_key: ""                          # NATS auth token — set by provisioning
-  max_reconnects: -1                   # -1 = unlimited
-  reconnect_wait: 5s
+Configuration is layered: **built-in defaults** → the `agent` object inside `pc-meta-data.json` on the config-drive (or its local cache) → **environment variables** (`PLUSCLOUDS_AGENT_*`, e.g. `PLUSCLOUDS_AGENT_NATS_API_KEY`), each layer overriding the previous one. There is no config file — this is the shape of the `agent` object the platform writes into `pc-meta-data.json`:
 
-agent:
-  heartbeat_interval: 30s
-  telemetry_interval: 30s             # changeable at runtime via telemetry.set_interval
-  allowed_operations:
-    - agent.allowed_operations
-    - services.list
-    - services.get
-    - services.start
-    - services.stop
-    - services.restart
-    - services.reload
-    - services.enable
-    - services.disable
-    - system.info
-    - system.metrics
-    - system.cpu
-    - system.memory
-    - system.disk
-    - system.network
-    - system.update
-    - telemetry.set_interval
-    # - vm.reboot
-    # - vm.shutdown
-    # - exec
-  allowed_commands:                    # only used when exec is enabled above
-    - /usr/bin/journalctl
-    - /usr/bin/df
-    - /usr/bin/free
-
-iso:
-  mount_path: /media/plusclouds-config # optional, checked silently at boot
-
-log:
-  level: info                          # debug | info | warn | error
-  format: json                         # json | console
-  file: /var/log/plusclouds/agent.log  # leave empty to disable file logging
-
-autoheal:
-  enabled: true
-  restart_delay: 10s
+```json
+{
+  "agent": {
+    "nats": {
+      "connection_type": "websocket",
+      "url": "nats://nats.plusclouds.com:4222",
+      "websocket_url": "wss://nats.plusclouds.com:443",
+      "agent_uuid": "<vm-uuid>",
+      "api_key": "<agent-api-key>",
+      "max_reconnects": -1,
+      "reconnect_wait": "5s"
+    },
+    "agent": {
+      "heartbeat_interval": "30s",
+      "telemetry_interval": "30s",
+      "allowed_operations": [
+        "agent.allowed_operations",
+        "agent.version",
+        "services.list",
+        "services.get",
+        "services.start",
+        "services.stop",
+        "services.restart",
+        "services.reload",
+        "services.enable",
+        "services.disable",
+        "system.info",
+        "system.metrics",
+        "system.cpu",
+        "system.memory",
+        "system.disk",
+        "system.network",
+        "system.update",
+        "telemetry.set_interval"
+      ],
+      "allowed_commands": ["/usr/bin/journalctl", "/usr/bin/df", "/usr/bin/free"]
+    },
+    "iso": {
+      "mount_path": "/media/plusclouds-config"
+    },
+    "log": {
+      "level": "info",
+      "format": "json",
+      "file": "/var/log/plusclouds/agent.log"
+    },
+    "autoheal": {
+      "enabled": true,
+      "restart_delay": "10s"
+    }
+  }
+}
 ```
 
-All values can be overridden by environment variables using the prefix `PLUSCLOUDS_AGENT_` (e.g. `PLUSCLOUDS_AGENT_NATS_API_KEY`).
+The top-level `virtual_machine_id`/`agent_api_key` fields of `pc-meta-data.json` (VM identity) always take precedence over `agent.nats.agent_uuid`/`agent.nats.api_key` if the two ever differ.
 
 ---
 
@@ -292,7 +283,7 @@ bin/plusclouds.windows  — PE32+, ~12 MB
 
 - **Outbound-only** — the agent never listens on any port
 - **Scoped JWT** — the NATS auth callout issues a JWT granting publish/subscribe only to this agent's own subjects
-- **Operation allowlist** — `allowed_operations` in `agent.yaml` is a hard gate; unknown or unlisted operations return `rejected`
+- **Operation allowlist** — `allowed_operations` in the config-drive's `agent` settings is a hard gate; unknown or unlisted operations return `rejected`
 - **Exec allowlist** — when `exec` is enabled, only binaries explicitly listed in `allowed_commands` can be invoked
 - **Token revocation** — remove `events_token` from the platform database and the agent is rejected on its next connection attempt
 

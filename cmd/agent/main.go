@@ -26,8 +26,6 @@ import (
 	"github.com/plusclouds/ubuntu-agent/pkg/isoconfig"
 )
 
-var cfgFile string
-
 func main() {
 	root := &cobra.Command{
 		Use:     "plusclouds-agent",
@@ -35,9 +33,6 @@ func main() {
 		Version: config.AgentVersion,
 		RunE:    run,
 	}
-
-	root.PersistentFlags().StringVar(&cfgFile, "config", "",
-		"Path to config file (default: /etc/plusclouds/agent.yaml)")
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -47,15 +42,47 @@ func main() {
 
 func run(_ *cobra.Command, _ []string) error {
 	// ------------------------------------------------------------------ //
-	// 1. Load configuration
+	// 1. Bootstrap: built-in defaults only, just enough to locate the
+	//    config-drive (or its local cache).
 	// ------------------------------------------------------------------ //
-	cfg, err := config.Load(cfgFile)
+	bootCfg, err := config.Load(nil)
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return fmt.Errorf("loading bootstrap config: %w", err)
+	}
+	bootLogger, err := buildLogger(bootCfg)
+	if err != nil {
+		return fmt.Errorf("building bootstrap logger: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bootExec := executor.New(bootLogger)
+
+	// ------------------------------------------------------------------ //
+	// 2. Locate and read the config-drive (or its local cache), then build
+	//    the real configuration by merging its "agent" settings on top of
+	//    defaults. There is no config file anymore — the platform writes
+	//    everything (identity, NATS, allowed operations, logging, ...)
+	//    into pc-meta-data.json at provisioning time.
+	// ------------------------------------------------------------------ //
+	locator := isoconfig.NewLocator(bootExec, bootLogger)
+	iso, err := isoconfig.Load(ctx, locator, bootCfg.ISO.MountPath, bootCfg.ISO.CachePath, bootCfg.ISO.Label, bootLogger)
+	if err != nil {
+		bootLogger.Warn("could not resolve config-drive metadata, running on built-in defaults",
+			zap.Error(err),
+		)
+		iso = &isoconfig.ISOMetadata{}
+	}
+
+	cfg, err := config.Load(iso.AgentSettings())
+	if err != nil {
+		return fmt.Errorf("building config from config-drive metadata: %w", err)
 	}
 
 	// ------------------------------------------------------------------ //
-	// 2. Initialise logger
+	// 3. Initialise the real logger, now that log config may have been
+	//    overridden by the config-drive metadata.
 	// ------------------------------------------------------------------ //
 	logger, err := buildLogger(cfg)
 	if err != nil {
@@ -65,54 +92,40 @@ func run(_ *cobra.Command, _ []string) error {
 
 	logger.Info("PlusClouds agent starting",
 		zap.String("version", config.AgentVersion),
-		zap.String("config_file", cfgFile),
 	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	exec := executor.New(logger)
 
 	// ------------------------------------------------------------------ //
-	// 3. Resolve identity — config file is primary; config-drive overrides
-	//    if present (mounted on demand if necessary, cached locally for
-	//    boots where the config-drive is no longer attached).
+	// 4. Resolve identity. The top-level config-drive identity fields
+	//    (virtual_machine_id, agent_api_key) always take precedence over
+	//    whatever the merged agent.nats settings say.
 	// ------------------------------------------------------------------ //
 	agentUUID := cfg.NATS.AgentUUID
 	agentAPIKey := cfg.NATS.APIKey
 
-	locator := isoconfig.NewLocator(exec, logger)
-	iso, err := isoconfig.Load(ctx, locator, cfg.ISO.MountPath, cfg.ISO.CachePath, cfg.ISO.Label, logger)
-	if err != nil {
-		logger.Warn("could not resolve config-drive identity, using config-file identity",
-			zap.Error(err),
-		)
-		iso = &isoconfig.ISOMetadata{}
-	} else if iso.VMID() != "" {
-		logger.Debug("config-drive metadata found, overriding agent identity",
-			zap.String("vm_id", iso.VMID()),
-		)
+	if iso.VMID() != "" {
 		agentUUID = iso.VMID()
 		agentAPIKey = iso.AgentAPIKey()
 	}
 
 	if agentUUID == "" {
-		logger.Warn("agent_uuid is not set — NATS auth will fail; set nats.agent_uuid in agent.yaml")
+		logger.Warn("agent_uuid is not set — NATS auth will fail; check the config-drive metadata")
 	}
 	if agentAPIKey == "" {
-		logger.Warn("api_key is not set — NATS auth will fail; set nats.api_key in agent.yaml")
+		logger.Warn("api_key is not set — NATS auth will fail; check the config-drive metadata")
 	}
 
 	logger.Info("agent identity resolved", zap.String("agent_uuid", agentUUID))
 
 	// ------------------------------------------------------------------ //
-	// 4. Initialise platform-specific service manager
+	// 5. Initialise platform-specific service manager
 	// ------------------------------------------------------------------ //
 	svcMgr, svcCleanup := newServiceManager(ctx, logger)
 	defer svcCleanup()
 
 	// ------------------------------------------------------------------ //
-	// 5. Initialise remaining modules
+	// 6. Initialise remaining modules
 	// ------------------------------------------------------------------ //
 	sysMod := system.New(iso)
 	resizer := diskresize.New(exec, logger)
@@ -124,7 +137,7 @@ func run(_ *cobra.Command, _ []string) error {
 	)
 
 	// ------------------------------------------------------------------ //
-	// 6. Connect to NATS
+	// 7. Connect to NATS
 	// ------------------------------------------------------------------ //
 	nc, err := natsclient.Connect(cfg.NATS, agentUUID, agentAPIKey, logger)
 	if err != nil {
@@ -133,7 +146,7 @@ func run(_ *cobra.Command, _ []string) error {
 	defer nc.Drain()
 
 	// ------------------------------------------------------------------ //
-	// 7. Create publisher and dispatcher
+	// 8. Create publisher and dispatcher
 	// ------------------------------------------------------------------ //
 	pub := publisher.New(nc, sysMod, agentUUID, cfg.Agent, logger)
 
@@ -146,7 +159,7 @@ func run(_ *cobra.Command, _ []string) error {
 	)
 
 	// ------------------------------------------------------------------ //
-	// 8. Subscribe to cmd subject
+	// 9. Subscribe to cmd subject
 	// ------------------------------------------------------------------ //
 	if err := nc.Subscribe(func(env protocol.Envelope) {
 		result := disp.Dispatch(ctx, env)
@@ -174,7 +187,7 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 
 	// ------------------------------------------------------------------ //
-	// 9. Start heartbeat and telemetry publisher
+	// 10. Start heartbeat and telemetry publisher
 	// ------------------------------------------------------------------ //
 	pub.Start(ctx)
 
@@ -185,7 +198,7 @@ func run(_ *cobra.Command, _ []string) error {
 	)
 
 	// ------------------------------------------------------------------ //
-	// 10. Wait for OS signal
+	// 11. Wait for OS signal
 	// ------------------------------------------------------------------ //
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

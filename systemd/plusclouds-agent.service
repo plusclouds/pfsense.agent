@@ -13,7 +13,7 @@ ExecStartPre=/bin/mkdir -p /var/log/plusclouds
 ExecStartPre=/bin/chmod 0750 /var/log/plusclouds
 ExecStartPre=/bin/mkdir -p /media/plusclouds-config
 
-ExecStart=/usr/local/bin/plusclouds-agent --config /etc/plusclouds/agent.yaml
+ExecStart=/usr/local/bin/plusclouds-agent
 
 Restart=always
 RestartSec=5

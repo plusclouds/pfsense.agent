@@ -104,16 +104,10 @@ install: build-prod
 	@echo "Creating directories..."
 	@mkdir -p $(CONFIG_DIR) $(LOG_DIR)
 	@chmod 0750 $(LOG_DIR)
-	@if [ ! -f $(CONFIG_DIR)/agent.yaml ]; then \
-		install -m 0640 configs/agent.yaml $(CONFIG_DIR)/agent.yaml; \
-		echo "Installed default config to $(CONFIG_DIR)/agent.yaml"; \
-	else \
-		echo "Config already exists at $(CONFIG_DIR)/agent.yaml — skipping."; \
-	fi
 	systemctl daemon-reload
 	@echo ""
 	@echo "Install complete. Next steps:"
-	@echo "  1. Edit $(CONFIG_DIR)/agent.yaml (set nats.agent_uuid and nats.api_key)"
+	@echo "  1. Attach the config-drive ISO (pc-meta-data.json) to this VM"
 	@echo "  2. systemctl enable --now plusclouds-agent"
 	@echo "  3. journalctl -fu plusclouds-agent"
 
@@ -136,7 +130,6 @@ package-deb: build-prod
 	cp $(BUILD_DIR)/$(BINARY_AGENT) dist/deb/usr/local/bin/
 	cp $(BUILD_DIR)/$(BINARY_CTL)   dist/deb/usr/local/bin/
 	cp systemd/plusclouds-agent.service dist/deb/etc/systemd/system/
-	cp configs/agent.yaml dist/deb/etc/plusclouds/agent.yaml
 	@printf "Package: plusclouds-agent\n\
 Version: $(VERSION)\n\
 Section: utils\n\

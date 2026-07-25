@@ -16,6 +16,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/plusclouds/ubuntu-agent/internal/config"
 	"github.com/plusclouds/ubuntu-agent/internal/executor"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/diskresize"
 	"github.com/plusclouds/ubuntu-agent/internal/modules/services"
@@ -260,6 +261,8 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) 
 			return nil, fmt.Errorf("re-publishing capabilities: %w", err)
 		}
 		return payload, nil
+	case "agent.version":
+		return map[string]string{"version": config.AgentVersion}, nil
 
 	// ---- telemetry ----------------------------------------------------
 	case "telemetry.set_interval":

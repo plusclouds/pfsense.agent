@@ -163,6 +163,56 @@ func TestRead_NumericIPEntryID_Parses(t *testing.T) {
 	}
 }
 
+// TestRead_RealisticSample_ParsesAgentSettings reads testdata/pc-meta-data.sample.json,
+// a sanitized copy of a real config-drive payload (secrets/identifying values
+// replaced with placeholders), and checks that both the VM metadata and the
+// "agent" runtime-config block parse correctly end to end.
+func TestRead_RealisticSample_ParsesAgentSettings(t *testing.T) {
+	meta, err := isoconfig.NewReader("testdata").Read()
+	if err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+
+	if got := meta.VMID(); got != "00000000-0000-0000-0000-000000000001" {
+		t.Errorf("VMID: got %q", got)
+	}
+	if got := meta.AgentAPIKey(); got != "REDACTED-AGENT-API-KEY" {
+		t.Errorf("AgentAPIKey: got %q", got)
+	}
+	if got := meta.PrimaryIP(); got != "10.128.0.1/32" {
+		t.Errorf("PrimaryIP: got %q", got)
+	}
+
+	agentSettings := meta.AgentSettings()
+	if len(agentSettings) == 0 {
+		t.Fatal("AgentSettings() should not be empty")
+	}
+
+	var parsed struct {
+		NATS struct {
+			WebSocketURL string `json:"websocket_url"`
+		} `json:"nats"`
+		Agent struct {
+			AllowedOperations []string `json:"allowed_operations"`
+		} `json:"agent"`
+		Log struct {
+			Level string `json:"level"`
+		} `json:"log"`
+	}
+	if err := json.Unmarshal(agentSettings, &parsed); err != nil {
+		t.Fatalf("AgentSettings() did not produce valid JSON: %v", err)
+	}
+	if parsed.NATS.WebSocketURL != "wss://nats.example.com:443" {
+		t.Errorf("agent.nats.websocket_url: got %q", parsed.NATS.WebSocketURL)
+	}
+	if len(parsed.Agent.AllowedOperations) == 0 {
+		t.Error("agent.agent.allowed_operations should not be empty")
+	}
+	if parsed.Log.Level != "debug" {
+		t.Errorf("agent.log.level: got %q", parsed.Log.Level)
+	}
+}
+
 func TestRead_NoFiles_ReturnsEmptyMeta(t *testing.T) {
 	dir := t.TempDir()
 	meta, err := isoconfig.NewReader(dir).Read()

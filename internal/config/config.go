@@ -1,10 +1,13 @@
 // Package config handles loading and validation of the agent configuration.
-// Configuration is layered: defaults → config file → environment variables.
-// Environment variables use the prefix PLUSCLOUDS_AGENT_ and dot-separated
-// keys map to underscores (e.g. nats.url → PLUSCLOUDS_AGENT_NATS_URL).
+// Configuration is layered: defaults → config-drive "agent" metadata (see
+// pkg/isoconfig) → environment variables. Environment variables use the
+// prefix PLUSCLOUDS_AGENT_ and dot-separated keys map to underscores (e.g.
+// nats.url → PLUSCLOUDS_AGENT_NATS_URL).
 package config
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -115,28 +118,25 @@ type AutohealConfig struct {
 	RestartDelay time.Duration `mapstructure:"restart_delay"`
 }
 
-// Load reads the configuration from the given file path, then overlays
-// environment variables (prefix PLUSCLOUDS_AGENT_), and finally applies
-// built-in defaults for any missing values.
-func Load(cfgFile string) (*Config, error) {
+// Load builds the agent configuration from built-in defaults, overlaid with
+// the "agent" JSON object from the config-drive metadata (pc-meta-data.json
+// or its local cache — see pkg/isoconfig), overlaid with environment
+// variables (prefix PLUSCLOUDS_AGENT_). agentSettings may be nil or empty,
+// in which case the built-in defaults (and any env overrides) apply as-is —
+// this is also how Load is called before the config-drive has been read, to
+// bootstrap the iso.mount_path/label/cache_path needed to find it.
+func Load(agentSettings json.RawMessage) (*Config, error) {
 	v := viper.New()
 
 	setDefaults(v)
 
-	if cfgFile != "" {
-		v.SetConfigFile(cfgFile)
-	} else {
-		v.SetConfigName("agent")
-		v.SetConfigType("yaml")
-		v.AddConfigPath("/etc/plusclouds")
-		v.AddConfigPath("$HOME/.plusclouds")
-		v.AddConfigPath("./configs")
-		v.AddConfigPath(".")
-	}
-
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("reading config file: %w", err)
+	if len(bytes.TrimSpace(agentSettings)) > 0 && !bytes.Equal(bytes.TrimSpace(agentSettings), []byte("null")) {
+		var m map[string]any
+		if err := json.Unmarshal(agentSettings, &m); err != nil {
+			return nil, fmt.Errorf("parsing agent settings from config-drive metadata: %w", err)
+		}
+		if err := v.MergeConfigMap(m); err != nil {
+			return nil, fmt.Errorf("merging agent settings from config-drive metadata: %w", err)
 		}
 	}
 
@@ -165,6 +165,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agent.telemetry_interval", 30*time.Second)
 	v.SetDefault("agent.allowed_operations", []string{
 		"agent.allowed_operations",
+		"agent.version",
 		"services.list",
 		"services.get",
 		"services.start",
