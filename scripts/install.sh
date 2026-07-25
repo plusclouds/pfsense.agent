@@ -22,6 +22,7 @@ BINARY_NAME="plusclouds-agent"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/plusclouds"
 LOG_DIR="/var/log/plusclouds"
+ISO_MOUNT_DIR="/media/plusclouds-config"
 SERVICE_DIR="/etc/systemd/system"
 SERVICE_NAME="plusclouds-agent.service"
 VERSION="${1:-${VERSION:-latest}}"
@@ -85,7 +86,12 @@ chmod 0644 "${SERVICE_DIR}/${SERVICE_NAME}"
 
 # $CONFIG_DIR only holds the optional /etc/plusclouds/environment override
 # file the systemd unit loads; there's no agent.yaml to install anymore.
-mkdir -p "$CONFIG_DIR" "$LOG_DIR"
+#
+# All three directories must exist before the service is (re)started: the
+# unit's ReadWritePaths= (under ProtectSystem=strict) is applied by systemd
+# before any ExecStartPre runs, so a missing path here fails the whole unit
+# with "226/NAMESPACE" rather than being created on demand.
+mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$ISO_MOUNT_DIR"
 chmod 0750 "$LOG_DIR"
 
 # --- enable + start ------------------------------------------------------------------

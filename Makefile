@@ -21,6 +21,7 @@ INSTALL_DIR    := /usr/local/bin
 SERVICE_DIR    := /etc/systemd/system
 CONFIG_DIR     := /etc/plusclouds
 LOG_DIR        := /var/log/plusclouds
+ISO_MOUNT_DIR  := /media/plusclouds-config
 
 .PHONY: all build build-agent build-ctl build-prod build-linux build-windows build-all test lint clean install uninstall package-deb help
 
@@ -102,7 +103,7 @@ install: build-prod
 	@echo "Installing systemd unit..."
 	install -m 0644 systemd/plusclouds-agent.service $(SERVICE_DIR)/plusclouds-agent.service
 	@echo "Creating directories..."
-	@mkdir -p $(CONFIG_DIR) $(LOG_DIR)
+	@mkdir -p $(CONFIG_DIR) $(LOG_DIR) $(ISO_MOUNT_DIR)
 	@chmod 0750 $(LOG_DIR)
 	systemctl daemon-reload
 	@echo ""
@@ -127,6 +128,7 @@ package-deb: build-prod
 	@mkdir -p dist/deb/etc/systemd/system
 	@mkdir -p dist/deb/etc/plusclouds
 	@mkdir -p dist/deb/var/log/plusclouds
+	@mkdir -p dist/deb/media/plusclouds-config
 	cp $(BUILD_DIR)/$(BINARY_AGENT) dist/deb/usr/local/bin/
 	cp $(BUILD_DIR)/$(BINARY_CTL)   dist/deb/usr/local/bin/
 	cp systemd/plusclouds-agent.service dist/deb/etc/systemd/system/
@@ -140,7 +142,7 @@ Description: PlusClouds Ubuntu VM Agent\n\
  A daemon for managing PlusClouds VMs via NATS.\n" > dist/deb/DEBIAN/control
 	@printf "#!/bin/sh\n\
 set -e\n\
-mkdir -p /var/log/plusclouds\n\
+mkdir -p /var/log/plusclouds /media/plusclouds-config\n\
 chmod 0750 /var/log/plusclouds\n\
 systemctl daemon-reload\n\
 systemctl enable plusclouds-agent\n" > dist/deb/DEBIAN/postinst

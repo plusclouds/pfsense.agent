@@ -160,9 +160,11 @@ chmod +x /usr/local/bin/plusclouds-agent
 #### 2. Create the runtime directories
 
 ```bash
-mkdir -p /var/log/plusclouds /var/lib/plusclouds/cache
+mkdir -p /var/log/plusclouds /var/lib/plusclouds/cache /media/plusclouds-config
 chmod 0750 /var/log/plusclouds
 ```
+
+`/media/plusclouds-config` must exist before the service is started — the systemd unit's `ReadWritePaths=` (under `ProtectSystem=strict`) is applied before any `ExecStartPre` runs, so a missing path fails the whole unit with `226/NAMESPACE` instead of being created on demand.
 
 #### 3. Attach the config-drive
 

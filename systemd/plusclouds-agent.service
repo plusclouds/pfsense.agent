@@ -9,9 +9,7 @@ Type=simple
 User=root
 Group=root
 
-ExecStartPre=/bin/mkdir -p /var/log/plusclouds
 ExecStartPre=/bin/chmod 0750 /var/log/plusclouds
-ExecStartPre=/bin/mkdir -p /media/plusclouds-config
 
 ExecStart=/usr/local/bin/plusclouds-agent
 
@@ -26,6 +24,13 @@ SyslogIdentifier=plusclouds-agent
 EnvironmentFile=-/etc/plusclouds/environment
 
 # Security
+#
+# NOTE: every ReadWritePaths= entry below must already exist on disk before
+# this unit is (re)started. systemd sets up the mount namespace — including
+# the ReadWritePaths= bind mounts — before running ExecStartPre, so an
+# ExecStartPre=mkdir here cannot create a missing entry: the namespace setup
+# itself fails first with "226/NAMESPACE". The installer (scripts/install.sh,
+# `make install`, the .deb postinst) is responsible for creating these paths.
 NoNewPrivileges=yes
 PrivateTmp=true
 ProtectSystem=strict
