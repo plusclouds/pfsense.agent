@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# PROVIDE: plusclouds_agent
+# REQUIRE: NETWORKING SERVERS
+# KEYWORD: shutdown
+#
+# Add the following to /etc/rc.conf.local (NOT /etc/rc.conf — pfSense
+# regenerates /etc/rc.conf from config.xml on every config write, which
+# would silently drop a manually-added enable flag there) to enable this
+# service:
+#
+# plusclouds_agent_enable="YES"
+
+. /etc/rc.subr
+
+name="plusclouds_agent"
+rcvar="${name}_enable"
+desc="PlusClouds pfSense agent"
+
+load_rc_config "${name}"
+
+: ${plusclouds_agent_enable:="NO"}
+: ${plusclouds_agent_config:="/etc/plusclouds/agent.yaml"}
+: ${plusclouds_agent_daemon_log:="/var/log/plusclouds/plusclouds-agent.daemon.log"}
+
+pidfile="/var/run/${name}.pid"
+command="/usr/sbin/daemon"
+command_args="-f -p ${pidfile} -o ${plusclouds_agent_daemon_log} -t plusclouds-agent /usr/local/bin/plusclouds-agent --config ${plusclouds_agent_config}"
+
+start_precmd="${name}_prestart"
+
+plusclouds_agent_prestart()
+{
+	mkdir -p /var/log/plusclouds
+}
+
+run_rc_command "$1"

@@ -186,6 +186,18 @@ heartbeat published
 telemetry published
 ```
 
+### pfSense/FreeBSD: automated install
+
+`install.sh` installs the binary, config, and an rc.d service (pfSense uses FreeBSD's rc.d, not systemd) in one step, and starts it.
+
+```bash
+make build-freebsd            # or build-freebsd-arm64 for Netgate 1100/2100/4100
+scp -r bin configs rc.d install.sh root@<pfsense-ip>:/root/plusclouds-agent-install/
+ssh root@<pfsense-ip> 'cd /root/plusclouds-agent-install && ./install.sh'
+```
+
+This installs the binary to `/usr/local/bin/plusclouds-agent`, the config to `/etc/plusclouds/agent.yaml` (only if not already present), the rc.d script to `/usr/local/etc/rc.d/plusclouds-agent`, enables it in `/etc/rc.conf.local` (**not** `/etc/rc.conf` — pfSense regenerates that file from `config.xml` on every config save, which would silently drop a manually-added enable flag), and starts it. Manage it afterward with the standard `service plusclouds-agent {start,stop,status}`.
+
 ---
 
 ## Configuration reference
