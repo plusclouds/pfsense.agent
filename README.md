@@ -208,6 +208,14 @@ ssh root@<pfsense-ip> 'cd /root/plusclouds-agent-install && ./install.sh'
 
 This installs the binary to `/usr/local/bin/plusclouds-agent`, the rc.d script to `/usr/local/etc/rc.d/plusclouds-agent`, enables it in `/etc/rc.conf.local` (**not** `/etc/rc.conf` — pfSense regenerates that file from `config.xml` on every config save, which would silently drop a manually-added enable flag), and starts it. Manage it afterward with the standard `service plusclouds-agent {start,stop,status}`.
 
+No local checkout? `scripts/pfsense-install.sh` does the same thing by downloading a GitHub release directly — paste this into a pfSense shell:
+
+```sh
+fetch -qo - https://raw.githubusercontent.com/plusclouds/pfsense.agent/master/scripts/pfsense-install.sh | sh
+```
+
+**Boot start note:** pfSense replaces the entire boot sequence with its own `/etc/pfSense-rc`, which only calls a hardcoded handful of specific scripts by name and never does a generic scan of `/usr/local/etc/rc.d/` (unlike stock FreeBSD's rcorder/`local_startup` mechanism) — so the `rc.conf.local` enable flag alone does **not** make this start automatically at boot, only `service plusclouds-agent start`/`stop`/`status` recognize it. Both installers additionally register the start command in pfSense's built-in `system/afterbootupshellcmd` config.xml field (run once at the end of every boot, no extra package required), which is what actually gets it running after a reboot.
+
 There's no config file to set up — like the Linux/Windows agent, it reads its identity and runtime settings from the config-drive ISO the platform attaches to the VM (see [Attach the config-drive](#3-attach-the-config-drive) above). If this VM has no config-drive (e.g. local testing), set `PLUSCLOUDS_AGENT_*` env vars in `/etc/plusclouds/environment` and run `service plusclouds-agent restart`.
 
 ---

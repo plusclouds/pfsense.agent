@@ -10,6 +10,16 @@
 # service:
 #
 # plusclouds_agent_enable="YES"
+#
+# IMPORTANT: the enable flag above only affects `service plusclouds-agent
+# {start,stop,status}` — it does NOT make this start automatically at
+# boot. pfSense replaces the entire boot sequence with its own
+# /etc/pfSense-rc, which only calls a hardcoded handful of specific
+# scripts by name and never does a generic scan of /usr/local/etc/rc.d/
+# (unlike stock FreeBSD's rcorder/local_startup mechanism). To actually
+# start this at boot, register it via pfSense's built-in
+# system/afterbootupshellcmd config.xml field instead — see install.sh /
+# scripts/pfsense-install.sh, which do this automatically.
 
 . /etc/rc.subr
 

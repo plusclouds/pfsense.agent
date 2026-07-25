@@ -113,11 +113,38 @@ else
 	echo 'plusclouds_agent_enable="YES"' >> "$RC_CONF_LOCAL"
 fi
 
+log "registering boot start via pfSense's afterbootupshellcmd"
+# pfSense replaces the entire boot sequence with its own /etc/pfSense-rc,
+# which only calls a hardcoded handful of specific scripts by name and
+# never does a generic scan of /usr/local/etc/rc.d/ — rc.conf(.local)'s
+# enable flag alone will never make this service start automatically. The
+# supported hook for a one-off custom boot command is the built-in (no
+# package needed) system/afterbootupshellcmd config.xml field, run once at
+# the end of pfSense's own rc.bootup. Appended rather than overwritten, in
+# case something else is already using it.
+/usr/local/bin/php <<'PHPEOF'
+<?php
+require_once("globals.inc");
+require_once("config.inc");
+
+$cmd = "/usr/sbin/service plusclouds-agent start";
+$existing = config_get_path('system/afterbootupshellcmd', '');
+
+if (strpos($existing, $cmd) !== false) {
+	exit(0);
+}
+
+$new = trim($existing) === '' ? $cmd : rtrim(trim($existing), '; ') . '; ' . $cmd;
+config_set_path('system/afterbootupshellcmd', $new);
+write_config("Registered plusclouds-agent boot start via afterbootupshellcmd");
+PHPEOF
+
 log "starting plusclouds-agent"
 service plusclouds-agent start
 
 echo
-echo "Done. plusclouds-agent ${VERSION} is enabled and will start on every boot."
+echo "Done. plusclouds-agent ${VERSION} is enabled and will start on every boot"
+echo "(via system/afterbootupshellcmd — see comment above for why)."
 echo "  Check status:  service plusclouds-agent status"
 echo "  Tail logs:     tail -f ${LOG_DIR}/agent.log"
 echo
