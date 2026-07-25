@@ -1,0 +1,150 @@
+{
+    "hostname": "example-vm-firewall",
+    "username": "root",
+    "password": "REDACTED",
+    "virtual_machine_id": "00000000-0000-0000-0000-000000000001",
+    "agent_api_key": "REDACTED-AGENT-API-KEY",
+    "virtual_disks": [
+        {
+            "disk_type": "user",
+            "device_number": 0,
+            "total_disk": 21474836480
+        },
+        {
+            "disk_type": "cdrom",
+            "device_number": 3,
+            "total_disk": 12048384
+        }
+    ],
+    "virtual_network_cards": [
+        {
+            "device_number": 1,
+            "mac_addr": "02:00:00:00:00:01",
+            "network_name": "example-private-net",
+            "network": {
+                "name": "example-private-net",
+                "ip_addr": "10.128.0.0/16",
+                "ip_range_start": "10.128.0.10/32",
+                "ip_range_end": "10.128.255.254/32",
+                "gateway": null,
+                "subnet": "16",
+                "netmask": "255.255.0.0",
+                "network": "10.128.0.0",
+                "dhcp_server": null,
+                "dns_nameservers": [
+                    "198.51.100.53/32"
+                ],
+                "mtu": 1500
+            },
+            "ip_list": {
+                "data": [
+                    {
+                        "id": 1010,
+                        "ip_addr": "10.128.0.1/32",
+                        "is_reserved": false
+                    }
+                ]
+            }
+        },
+        {
+            "device_number": 0,
+            "mac_addr": "02:00:00:00:00:02",
+            "network_name": "Public Internet",
+            "network": {
+                "name": "Public Internet",
+                "ip_addr": "203.0.113.0/24",
+                "ip_range_start": "203.0.113.2/32",
+                "ip_range_end": "203.0.113.254/32",
+                "gateway": null,
+                "subnet": "24",
+                "netmask": "255.255.255.0",
+                "network": "203.0.113.0",
+                "dhcp_server": "203.0.113.1/32",
+                "dns_nameservers": [
+                    "198.51.100.53/32",
+                    "198.51.100.54/32"
+                ],
+                "mtu": 1500
+            },
+            "ip_list": {
+                "data": [
+                    {
+                        "id": 1011,
+                        "ip_addr": "203.0.113.16/32",
+                        "is_reserved": false
+                    }
+                ]
+            }
+        }
+    ],
+    "service_roles": [],
+    "compute_pool": {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "name": "Example Hypervisor Pool",
+        "pool_type": "one",
+        "hypervisor_type": "XenServer",
+        "hypervisor_version": "8.2"
+    },
+    "cloud_node": {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "name": "Example Cloud Node",
+        "location": null,
+        "provider": null,
+        "region": null
+    },
+    "ssh_keys": [],
+    "env_vars": [],
+    "tokens": [],
+    "agent": {
+        "nats": {
+            "connection_type": "websocket",
+            "url": "nats://example.internal:4222",
+            "websocket_url": "wss://nats.example.com:443",
+            "agent_uuid": "00000000-0000-0000-0000-000000000001",
+            "api_key": "REDACTED-AGENT-API-KEY",
+            "max_reconnects": -1,
+            "reconnect_wait": "5s"
+        },
+        "agent": {
+            "heartbeat_interval": "30s",
+            "telemetry_interval": "30s",
+            "allowed_operations": [
+                "agent.allowed_operations",
+                "agent.version",
+                "services.list",
+                "services.get",
+                "services.start",
+                "services.stop",
+                "services.restart",
+                "services.reload",
+                "services.enable",
+                "services.disable",
+                "system.info",
+                "system.metrics",
+                "system.cpu",
+                "system.memory",
+                "system.disk",
+                "system.network",
+                "system.update",
+                "telemetry.set_interval"
+            ],
+            "allowed_commands": [
+                "/usr/bin/journalctl",
+                "/usr/bin/df",
+                "/usr/bin/free"
+            ]
+        },
+        "iso": {
+            "mount_path": "/media/plusclouds-config"
+        },
+        "log": {
+            "level": "debug",
+            "format": "console",
+            "file": "/var/log/plusclouds/agent.log"
+        },
+        "autoheal": {
+            "enabled": true,
+            "restart_delay": "10s"
+        }
+    }
+}

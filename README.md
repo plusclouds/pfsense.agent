@@ -4,7 +4,7 @@
 
 The PlusClouds VM Agent is a lightweight, production-grade daemon that turns any Linux or Windows machine into an intelligent infrastructure node. It connects to the PlusClouds platform over NATS, streams real-time telemetry, executes remote commands, and announces its own capabilities — so your platform always knows exactly what each machine can do.
 
-No REST API. No open ports. No certificates to manage. Just a single binary, a config file, and a secure WebSocket connection to the platform.
+No REST API. No open ports. No certificates to manage. No config file, either — the agent reads its entire runtime configuration (identity, NATS connection, allowed operations, logging, autoheal) from the config-drive ISO the platform attaches at provisioning time, and caches a local copy so it keeps working on later boots even if the drive is detached.
 
 ---
 
@@ -31,7 +31,7 @@ agent.vm.{uuid}.evt   →  agent sends telemetry, heartbeat, capabilities, resul
 vm.{uuid}.telemetry   →  client-facing telemetry stream (VM_TELEMETRY JetStream, 15-min retention)
 ```
 
-Authentication uses the `agent_api_key` from `agent.yaml` (written by the platform during provisioning). The NATS auth callout validates every connection against the platform database and issues a scoped JWT — no static passwords, no shared secrets.
+Authentication uses the `agent_api_key` from the config-drive's `pc-meta-data.json` (written by the platform during provisioning). The NATS auth callout validates every connection against the platform database and issues a scoped JWT — no static passwords, no shared secrets.
 
 ### Message envelope
 
@@ -121,13 +121,33 @@ The agent announces its available operations on boot via a `capabilities` event.
 | `exec` | Run an allowed binary | `command` (string), `args` (array) |
 | `pfsense.set_password` | Change a local pfSense user's password (pfSense/FreeBSD only) | `username` (string), `password` (string, sensitive) |
 
-All operations are opt-in. Remove any entry from `allowed_operations` in `agent.yaml` and the platform receives a `rejected` result instead of executing it.
+All operations are opt-in. Remove any entry from `allowed_operations` in the config-drive's `agent` settings and the platform receives a `rejected` result instead of executing it.
 
 ---
 
 ## Installation
 
-### 1. Deploy the binary
+### Quick install (recommended)
+
+`scripts/install.sh` installs (or upgrades) the agent as a systemd service in one step: it resolves the latest GitHub release (or a version you pin), downloads `plusclouds.linux` and the systemd unit, sets up `/var/log/plusclouds` and `/etc/plusclouds`, and enables + starts the service. It's safe to re-run for upgrades.
+
+```bash
+# Install the latest release
+curl -fsSL https://raw.githubusercontent.com/plusclouds/vm.agent/master/scripts/install.sh | sudo bash
+
+# Or pin a specific release
+curl -fsSL https://raw.githubusercontent.com/plusclouds/vm.agent/master/scripts/install.sh | sudo bash -s v2.0.0
+
+# Or, if you already have the repo checked out
+sudo ./scripts/install.sh          # latest
+sudo ./scripts/install.sh v2.0.0   # pinned
+```
+
+Requirements: root, `curl`, systemd, and `amd64` (the only architecture published today). There's no config file to set up afterward — the agent reads its identity and runtime settings from the config-drive ISO the platform attaches to the VM (see [Attach the config-drive](#3-attach-the-config-drive) below). If the VM has no config-drive (e.g. local testing), set `PLUSCLOUDS_AGENT_NATS_AGENT_UUID` / `PLUSCLOUDS_AGENT_NATS_API_KEY` in `/etc/plusclouds/environment` and restart the service.
+
+### Manual installation
+
+#### 1. Deploy the binary
 
 ```bash
 # Linux
@@ -138,30 +158,20 @@ chmod +x /usr/local/bin/plusclouds-agent
 # Copy bin/plusclouds.windows to the target machine and run it as a service
 ```
 
-### 2. Create the config directory
+#### 2. Create the runtime directories
 
 ```bash
-mkdir -p /etc/plusclouds /var/log/plusclouds
+mkdir -p /var/log/plusclouds /var/lib/plusclouds/cache /media/plusclouds-config
 chmod 0750 /var/log/plusclouds
 ```
 
-### 3. Deploy the config
+`/media/plusclouds-config` must exist before the service is started — the systemd unit's `ReadWritePaths=` (under `ProtectSystem=strict`) is applied before any `ExecStartPre` runs, so a missing path fails the whole unit with `226/NAMESPACE` instead of being created on demand.
 
-```bash
-scp configs/agent.yaml root@<server-ip>:/etc/plusclouds/agent.yaml
-```
+#### 3. Attach the config-drive
 
-Edit `/etc/plusclouds/agent.yaml` and set the identity fields for this machine (written automatically during VM provisioning):
+The platform attaches a config-drive ISO (a standard cloud-init NoCloud drive labelled `cidata`, containing `pc-meta-data.json` alongside the usual `meta-data`/`user-data`) to the VM during provisioning. The agent mounts it automatically at boot, reads its identity, NATS, and runtime settings from it, and caches a local copy under `/var/lib/plusclouds/cache/` so it keeps working on later boots even if the drive is later detached. There's nothing to deploy manually — if you're running the agent somewhere the config-drive isn't attached (e.g. local testing), see [Configuration reference](#configuration-reference) below for the built-in defaults and environment variable overrides.
 
-```yaml
-nats:
-  connection_type: websocket           # "nats" or "websocket"
-  websocket_url: wss://nats.plusclouds.com:443
-  agent_uuid: "<vm-uuid>"             # from iaas_virtual_machines
-  api_key:     "<agent-api-key>"      # from iaas_virtual_machines.events_token
-```
-
-### 4. Install and start the systemd service
+#### 4. Install and start the systemd service
 
 ```bash
 scp systemd/plusclouds-agent.service root@<server-ip>:/etc/systemd/system/
@@ -169,7 +179,7 @@ systemctl daemon-reload
 systemctl enable --now plusclouds-agent
 ```
 
-### 5. Verify
+#### 5. Verify
 
 ```bash
 journalctl -fu plusclouds-agent
@@ -188,73 +198,78 @@ telemetry published
 
 ### pfSense/FreeBSD: automated install
 
-`install.sh` installs the binary, config, and an rc.d service (pfSense uses FreeBSD's rc.d, not systemd) in one step, and starts it.
+`install.sh` installs the binary and an rc.d service (pfSense uses FreeBSD's rc.d, not systemd) in one step, and starts it. Safe to re-run for upgrades.
 
 ```bash
 make build-freebsd            # or build-freebsd-arm64 for Netgate 1100/2100/4100
-scp -r bin configs rc.d install.sh root@<pfsense-ip>:/root/plusclouds-agent-install/
+scp -r bin rc.d install.sh root@<pfsense-ip>:/root/plusclouds-agent-install/
 ssh root@<pfsense-ip> 'cd /root/plusclouds-agent-install && ./install.sh'
 ```
 
-This installs the binary to `/usr/local/bin/plusclouds-agent`, the config to `/etc/plusclouds/agent.yaml` (only if not already present), the rc.d script to `/usr/local/etc/rc.d/plusclouds-agent`, enables it in `/etc/rc.conf.local` (**not** `/etc/rc.conf` — pfSense regenerates that file from `config.xml` on every config save, which would silently drop a manually-added enable flag), and starts it. Manage it afterward with the standard `service plusclouds-agent {start,stop,status}`.
+This installs the binary to `/usr/local/bin/plusclouds-agent`, the rc.d script to `/usr/local/etc/rc.d/plusclouds-agent`, enables it in `/etc/rc.conf.local` (**not** `/etc/rc.conf` — pfSense regenerates that file from `config.xml` on every config save, which would silently drop a manually-added enable flag), and starts it. Manage it afterward with the standard `service plusclouds-agent {start,stop,status}`.
+
+There's no config file to set up — like the Linux/Windows agent, it reads its identity and runtime settings from the config-drive ISO the platform attaches to the VM (see [Attach the config-drive](#3-attach-the-config-drive) above). If this VM has no config-drive (e.g. local testing), set `PLUSCLOUDS_AGENT_*` env vars in `/etc/plusclouds/environment` and run `service plusclouds-agent restart`.
 
 ---
 
 ## Configuration reference
 
-```yaml
-nats:
-  connection_type: websocket           # nats | websocket (ws:// needs no certificates)
-  url: nats://nats.plusclouds.com:4222
-  websocket_url: wss://nats.plusclouds.com:443
-  agent_uuid: ""                       # VM UUID — set by provisioning
-  api_key: ""                          # NATS auth token — set by provisioning
-  max_reconnects: -1                   # -1 = unlimited
-  reconnect_wait: 5s
+Configuration is layered: **built-in defaults** → the `agent` object inside `pc-meta-data.json` on the config-drive (or its local cache) → **environment variables** (`PLUSCLOUDS_AGENT_*`, e.g. `PLUSCLOUDS_AGENT_NATS_API_KEY`), each layer overriding the previous one. There is no config file — this is the shape of the `agent` object the platform writes into `pc-meta-data.json`:
 
-agent:
-  heartbeat_interval: 30s
-  telemetry_interval: 30s             # changeable at runtime via telemetry.set_interval
-  allowed_operations:
-    - agent.allowed_operations
-    - services.list
-    - services.get
-    - services.start
-    - services.stop
-    - services.restart
-    - services.reload
-    - services.enable
-    - services.disable
-    - system.info
-    - system.metrics
-    - system.cpu
-    - system.memory
-    - system.disk
-    - system.network
-    - system.update
-    - telemetry.set_interval
-    # - vm.reboot
-    # - vm.shutdown
-    # - exec
-  allowed_commands:                    # only used when exec is enabled above
-    - /usr/bin/journalctl
-    - /usr/bin/df
-    - /usr/bin/free
-
-iso:
-  mount_path: /media/plusclouds-config # optional, checked silently at boot
-
-log:
-  level: info                          # debug | info | warn | error
-  format: json                         # json | console
-  file: /var/log/plusclouds/agent.log  # leave empty to disable file logging
-
-autoheal:
-  enabled: true
-  restart_delay: 10s
+```json
+{
+  "agent": {
+    "nats": {
+      "connection_type": "websocket",
+      "url": "nats://nats.plusclouds.com:4222",
+      "websocket_url": "wss://nats.plusclouds.com:443",
+      "agent_uuid": "<vm-uuid>",
+      "api_key": "<agent-api-key>",
+      "max_reconnects": -1,
+      "reconnect_wait": "5s"
+    },
+    "agent": {
+      "heartbeat_interval": "30s",
+      "telemetry_interval": "30s",
+      "allowed_operations": [
+        "agent.allowed_operations",
+        "agent.version",
+        "services.list",
+        "services.get",
+        "services.start",
+        "services.stop",
+        "services.restart",
+        "services.reload",
+        "services.enable",
+        "services.disable",
+        "system.info",
+        "system.metrics",
+        "system.cpu",
+        "system.memory",
+        "system.disk",
+        "system.network",
+        "system.update",
+        "telemetry.set_interval"
+      ],
+      "allowed_commands": ["/usr/bin/journalctl", "/usr/bin/df", "/usr/bin/free"]
+    },
+    "iso": {
+      "mount_path": "/media/plusclouds-config"
+    },
+    "log": {
+      "level": "info",
+      "format": "json",
+      "file": "/var/log/plusclouds/agent.log"
+    },
+    "autoheal": {
+      "enabled": true,
+      "restart_delay": "10s"
+    }
+  }
+}
 ```
 
-All values can be overridden by environment variables using the prefix `PLUSCLOUDS_AGENT_` (e.g. `PLUSCLOUDS_AGENT_NATS_API_KEY`).
+The top-level `virtual_machine_id`/`agent_api_key` fields of `pc-meta-data.json` (VM identity) always take precedence over `agent.nats.agent_uuid`/`agent.nats.api_key` if the two ever differ.
 
 ---
 
@@ -320,7 +335,7 @@ The two steps are independent — a reverted network change does not block passw
 
 - **Outbound-only** — the agent never listens on any port
 - **Scoped JWT** — the NATS auth callout issues a JWT granting publish/subscribe only to this agent's own subjects
-- **Operation allowlist** — `allowed_operations` in `agent.yaml` is a hard gate; unknown or unlisted operations return `rejected`
+- **Operation allowlist** — `allowed_operations` in the config-drive's `agent` settings is a hard gate; unknown or unlisted operations return `rejected`
 - **Exec allowlist** — when `exec` is enabled, only binaries explicitly listed in `allowed_commands` can be invoked
 - **Token revocation** — remove `events_token` from the platform database and the agent is rejected on its next connection attempt
 

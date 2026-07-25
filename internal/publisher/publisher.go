@@ -144,6 +144,10 @@ var operationCatalog = map[string]protocol.OperationSchema{
 		Operation:   "agent.allowed_operations",
 		Description: "Return and re-publish the current capabilities list (allowed operations and parameters).",
 	},
+	"agent.version": {
+		Operation:   "agent.version",
+		Description: "Return the running agent's build version.",
+	},
 	"services.list": {
 		Operation:   "services.list",
 		Description: "List all loaded systemd services on the machine.",

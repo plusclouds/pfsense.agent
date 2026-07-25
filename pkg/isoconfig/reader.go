@@ -32,6 +32,11 @@ type VirtualMachineMetadata struct {
 	SSHKeys             []string             `json:"ssh_keys"`
 	EnvVars             []json.RawMessage    `json:"env_vars"`
 	Tokens              []json.RawMessage    `json:"tokens"`
+	// Agent carries the full agent runtime configuration (nats, agent,
+	// iso, log, autoheal sections) written by the platform. It replaces
+	// the old agent.yaml file — see internal/config.Load, which merges
+	// this raw JSON on top of built-in defaults.
+	Agent json.RawMessage `json:"agent"`
 }
 
 // DataList is the generic wrapper used by nested list fields that are still
@@ -178,6 +183,16 @@ func (m *ISOMetadata) AgentAPIKey() string {
 
 // AgentToken returns the NATS agent API key (alias for AgentAPIKey).
 func (m *ISOMetadata) AgentToken() string { return m.AgentAPIKey() }
+
+// AgentSettings returns the raw "agent" JSON object from the config-drive
+// metadata (nats/agent/iso/log/autoheal sections), or nil if absent. It is
+// passed to config.Load to build the agent's runtime configuration.
+func (m *ISOMetadata) AgentSettings() json.RawMessage {
+	if m == nil || m.raw == nil {
+		return nil
+	}
+	return m.raw.Agent
+}
 
 // ControlPlaneURL returns an empty string. The control-plane URL is not
 // carried in the metadata file; configure it via the agent config file.

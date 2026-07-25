@@ -33,7 +33,7 @@ func (l *freebsdLocator) Locate(ctx context.Context, mountPath, label string) (s
 		return "", noop, nil // no config-drive attached — expected outcome
 	}
 
-	mounted, err := l.isMounted(ctx, mountPath)
+	mounted, err := l.isConfigDriveMounted(ctx, mountPath)
 	if err != nil {
 		return "", noop, fmt.Errorf("checking mount status of %q: %w", mountPath, err)
 	}
@@ -63,20 +63,39 @@ func (l *freebsdLocator) Locate(ctx context.Context, mountPath, label string) (s
 	return mountPath, unmount, nil
 }
 
-// isMounted reports whether mountPath is currently a mount point. FreeBSD
-// has no /proc/self/mountinfo by default, so this shells out to `mount` and
-// scans its output for a line mentioning mountPath as the mount point
-// (format: "<device> on <mountPath> (<options>)").
-func (l *freebsdLocator) isMounted(ctx context.Context, mountPath string) (bool, error) {
+// isConfigDriveMounted reports whether a cd9660/udf filesystem — i.e. the
+// config-drive itself, not just anything — is mounted at mountPath. Only
+// matching on the path (ignoring filesystem type) risks a false positive if
+// something unrelated is mounted there; checking the type mirrors the fix
+// applied to locator_linux.go's equivalent check for the same reason (there,
+// a systemd mount-namespace self-bind-mount could otherwise be mistaken for
+// the config-drive — not applicable to FreeBSD's rc.d/daemon(8), which uses
+// no such namespacing, but the type check is strictly more correct either way).
+func (l *freebsdLocator) isConfigDriveMounted(ctx context.Context, mountPath string) (bool, error) {
 	stdout, _, err := l.runner.Execute(ctx, "mount")
 	if err != nil {
 		return false, err
 	}
+	return mountOutputHasConfigDrive(stdout, mountPath), nil
+}
+
+// mountOutputHasConfigDrive parses FreeBSD `mount` command output (format:
+// "<device> on <mountPath> (<fstype>, <options...>)") and reports whether a
+// cd9660/udf filesystem is mounted at mountPath.
+func mountOutputHasConfigDrive(mountOutput, mountPath string) bool {
 	needle := " on " + mountPath + " ("
-	for _, line := range strings.Split(stdout, "\n") {
-		if strings.Contains(line, needle) {
-			return true, nil
+	for _, line := range strings.Split(mountOutput, "\n") {
+		idx := strings.Index(line, needle)
+		if idx < 0 {
+			continue
+		}
+		rest := line[idx+len(needle):]
+		fstype, _, _ := strings.Cut(rest, ",")
+		fstype, _, _ = strings.Cut(fstype, ")")
+		switch strings.TrimSpace(fstype) {
+		case "cd9660", "udf":
+			return true
 		}
 	}
-	return false, nil
+	return false
 }

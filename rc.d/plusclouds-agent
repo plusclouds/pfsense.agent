@@ -20,18 +20,28 @@ desc="PlusClouds pfSense agent"
 load_rc_config "${name}"
 
 : ${plusclouds_agent_enable:="NO"}
-: ${plusclouds_agent_config:="/etc/plusclouds/agent.yaml"}
 : ${plusclouds_agent_daemon_log:="/var/log/plusclouds/plusclouds-agent.daemon.log"}
 
 pidfile="/var/run/${name}.pid"
 command="/usr/sbin/daemon"
-command_args="-f -p ${pidfile} -o ${plusclouds_agent_daemon_log} -t plusclouds-agent /usr/local/bin/plusclouds-agent --config ${plusclouds_agent_config}"
+command_args="-f -p ${pidfile} -o ${plusclouds_agent_daemon_log} -t plusclouds-agent /usr/local/bin/plusclouds-agent"
 
 start_precmd="${name}_prestart"
 
+# There's no config file — the agent reads its identity and runtime config
+# from the config-drive ISO (pc-meta-data.json) attached to this VM. If
+# there's no config-drive attached (e.g. local testing), an optional
+# /etc/plusclouds/environment file (KEY=VALUE lines, same format Linux's
+# systemd EnvironmentFile= expects) can set PLUSCLOUDS_AGENT_* overrides —
+# sourced and exported here so daemon(8)'s child process inherits them.
 plusclouds_agent_prestart()
 {
 	mkdir -p /var/log/plusclouds
+	if [ -f /etc/plusclouds/environment ]; then
+		set -a
+		. /etc/plusclouds/environment
+		set +a
+	fi
 }
 
 run_rc_command "$1"
