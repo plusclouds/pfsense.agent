@@ -40,13 +40,18 @@ if ($index === null) {
 	exit(1);
 }
 
-$user_item_config = [
-	'idx'  => $index,
-	'item' => config_get_path("system/user/{$index}"),
-];
-
-local_user_set_password($user_item_config, $password);
+// local_user_set_password(&$user, $password) mutates $user in place (sets
+// the new hash field, clears the old ones) but does NOT persist anything
+// itself — config_set_path()/write_config() are the caller's job. (An
+// earlier version of this script assumed a newer/different pfSense API
+// that wrapped $user in a ['idx'=>..,'item'=>..] array and persisted
+// internally; that doesn't exist on pfSense 2.7.2 and silently no-op'd —
+// this caller-persists form was confirmed against the actual deployed
+// src/etc/inc/auth.inc via ReflectionFunction on a real box.)
+$user = config_get_path("system/user/{$index}");
+local_user_set_password($user, $password);
+config_set_path("system/user/{$index}", $user);
 write_config("Password changed via PlusClouds agent for user {$username}");
-local_user_set($user_item_config['item']);
+local_user_set($user);
 
 echo json_encode(['status' => 'ok', 'username' => $username]);
