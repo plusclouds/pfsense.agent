@@ -13,5 +13,6 @@ require_once("interfaces.inc");
 echo json_encode([
 	'interfaces' => config_get_path('interfaces', []),
 	'gateways'   => config_get_path('gateways/gateway_item', []),
+	'defaultgw4' => config_get_path('gateways/defaultgw4', ''),
 	'dnsserver'  => config_get_path('system/dnsserver', []),
 ]);

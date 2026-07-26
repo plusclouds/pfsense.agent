@@ -21,6 +21,7 @@
 require_once("globals.inc");
 require_once("config.inc");
 require_once("interfaces.inc");
+require_once("system.inc");
 
 $input = json_decode(stream_get_contents(STDIN), true);
 if (!is_array($input) || !is_array($input['interfaces'] ?? null)) {
@@ -34,8 +35,7 @@ $logicals_to_apply = [];
 
 // Single-NIC boxes (the common cloud/VPS case) have their one interface
 // auto-assigned as "lan" below, never "wan" — so a plain `$logical ===
-// 'wan'` check would never mark it as the default gateway, leaving the
-// box with an IP and a gateway object but no actual default route. If
+// 'wan'` check would never pick it as the default-route interface. If
 // this is the only interface in the plan carrying a gateway, it must be
 // the default route regardless of its logical name.
 $gateway_count = 0;
@@ -44,6 +44,7 @@ foreach ($input['interfaces'] as $plan) {
 		$gateway_count++;
 	}
 }
+$default_gw_name = null;
 
 foreach ($input['interfaces'] as $plan) {
 	$ifname = $plan['ifname'] ?? '';
@@ -105,7 +106,14 @@ foreach ($input['interfaces'] as $plan) {
 			'descr'      => 'Set by PlusClouds agent from provisioning metadata',
 		];
 		if ($logical === 'wan' || $gateway_count === 1) {
+			// The per-item 'defaultgw' flag is cosmetic only — pfSense's
+			// return_gateways_array() strips it on every read (gwlb.inc),
+			// and the actual default-route selection reads the top-level
+			// gateways/defaultgw4 key instead (set below, matching what
+			// system_gateways_edit.php's own save handler does). Set both
+			// so the GUI's "Default" column agrees with what's live.
 			$gw_item['defaultgw'] = true;
+			$default_gw_name = $gwname;
 		}
 		if ($existing_idx !== null) {
 			config_set_path("gateways/gateway_item/{$existing_idx}", $gw_item);
@@ -134,10 +142,24 @@ if (!empty($all_dns)) {
 	config_set_path('system/dnsserver', $all_dns);
 }
 
+if ($default_gw_name !== null) {
+	config_set_path('gateways/defaultgw4', $default_gw_name);
+}
+
 write_config("Network settings applied via PlusClouds agent from provisioning metadata");
 
 foreach (array_unique($logicals_to_apply) as $logical) {
 	interface_configure($logical, true);
+}
+
+// interface_configure() only calls system_routing_configure() itself when
+// !platform_booting() (interfaces.inc) — but this script runs from
+// system/afterbootupshellcmd, i.e. inside pfSense's own boot sequence,
+// where platform_booting() is still true. That silently skips the actual
+// route install regardless of the defaultgw config above, so it must be
+// called explicitly and unconditionally here.
+if ($default_gw_name !== null) {
+	system_routing_configure();
 }
 
 echo json_encode(['status' => 'ok', 'interfaces' => $results]);
