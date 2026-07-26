@@ -32,6 +32,19 @@ $results = [];
 $all_dns = [];
 $logicals_to_apply = [];
 
+// Single-NIC boxes (the common cloud/VPS case) have their one interface
+// auto-assigned as "lan" below, never "wan" — so a plain `$logical ===
+// 'wan'` check would never mark it as the default gateway, leaving the
+// box with an IP and a gateway object but no actual default route. If
+// this is the only interface in the plan carrying a gateway, it must be
+// the default route regardless of its logical name.
+$gateway_count = 0;
+foreach ($input['interfaces'] as $plan) {
+	if (!empty($plan['gateway'])) {
+		$gateway_count++;
+	}
+}
+
 foreach ($input['interfaces'] as $plan) {
 	$ifname = $plan['ifname'] ?? '';
 	$result = ['ifname' => $ifname, 'applied' => false];
@@ -91,7 +104,7 @@ foreach ($input['interfaces'] as $plan) {
 			'ipprotocol' => 'inet',
 			'descr'      => 'Set by PlusClouds agent from provisioning metadata',
 		];
-		if ($logical === 'wan') {
+		if ($logical === 'wan' || $gateway_count === 1) {
 			$gw_item['defaultgw'] = true;
 		}
 		if ($existing_idx !== null) {
