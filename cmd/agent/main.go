@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/nats-io/nats.go"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -284,7 +286,14 @@ func applyBootNetworkConfig(ctx context.Context, cfg *config.Config, iso *isocon
 		nc.Drain()
 	}
 
-	if probeErr != nil {
+	// An auth rejection can only happen after a full TCP/TLS/WebSocket
+	// connection and a real protocol exchange with the NATS server — it is
+	// proof the network change worked, not evidence it didn't. Reverting
+	// here would discard a working network config over a credentials
+	// problem (e.g. a stale agent_api_key in the metadata) that reverting
+	// the network can't fix anyway. Only genuine reachability failures
+	// (DNS, dial, timeout) should trigger a revert.
+	if probeErr != nil && !errors.Is(probeErr, nats.ErrAuthorization) {
 		logger.Warn("boot network config: platform unreachable after apply — reverting",
 			zap.Error(probeErr))
 		if len(result.Snapshot) == 0 {
@@ -297,6 +306,11 @@ func applyBootNetworkConfig(ctx context.Context, cfg *config.Config, iso *isocon
 		}
 		logger.Warn("boot network config: reverted to pre-boot config, will retry next boot")
 		return
+	}
+
+	if probeErr != nil {
+		logger.Warn("boot network config: applied and network verified, but NATS rejected credentials — not reverting",
+			zap.Error(probeErr))
 	}
 
 	if err := writeMarker(netconfigMarkerPath); err != nil {
