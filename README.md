@@ -312,12 +312,12 @@ bin/plusclouds.windows  — PE32+, ~12 MB
 
 ## Boot-time provisioning from ISO metadata (pfSense)
 
-On pfSense/FreeBSD, the agent applies two pieces of config from the ISO config-drive metadata (`pc-meta-data.json`) automatically on boot — **not** via a NATS command, since NATS itself is only reachable once the network config is correct. Each step runs at most once, tracked by its own marker file, and retries on the next boot until it succeeds:
+On pfSense/FreeBSD, the agent applies two pieces of config from the ISO config-drive metadata (`pc-meta-data.json`) automatically on boot — **not** via a NATS command, since NATS itself is only reachable once the network config is correct.
 
 | Step | Marker | Behavior |
 |---|---|---|
-| Network config | `/var/db/plusclouds-agent/netconfig.applied` | Matches each metadata NIC to a local interface by MAC address and sets static IP/subnet/gateway/DNS/MTU on interfaces that are **already assigned** in the base image (wan/lan/optN role assignment is out of scope). Snapshots the live config first; after applying, attempts a real, non-retrying NATS connect as a verification probe. If the platform can't be reached, it **reverts** to the snapshot and leaves the marker unset so it retries next boot — only a verified-successful apply is marked done. |
-| Password | `/var/db/plusclouds-agent/password-set.applied` | Sets the `username`/`password` from the metadata as the matching local pfSense user's login password, via the same `pfsense.set_password` machinery available as a NATS command. No reachability risk, so no revert — just retried each boot until it succeeds. |
+| Network config | `/var/db/plusclouds-agent/netconfig.applied` | Runs at most once, tracked by its marker file, and retries on the next boot until it succeeds. Matches each metadata NIC to a local interface by MAC address and sets static IP/subnet/gateway/DNS/MTU on interfaces that are **already assigned** in the base image (wan/lan/optN role assignment is out of scope). Snapshots the live config first; after applying, attempts a real, non-retrying NATS connect as a verification probe. If the platform can't be reached, it **reverts** to the snapshot and leaves the marker unset so it retries next boot — only a verified-successful apply is marked done. |
+| Password | *(none)* | Runs on **every** agent start — no marker. Sets the ISO metadata's password on pfSense's default superuser account (matched by uid 0, not by name — see `SetDefaultUserPassword`). Deliberately not gated by a marker: a marker here would trust the script's self-reported success, and a silently-broken script reporting a false positive would permanently suppress every future attempt, even surviving an agent upgrade that fixes the bug (this happened in practice). Re-applying the same password is idempotent, so it just always runs. |
 
 The two steps are independent — a reverted network change does not block password provisioning, and vice versa. A NIC whose `network.gateway` is `null` in the metadata gets its static IP/subnet set with no gateway/default route configured — the agent never guesses a route.
 

@@ -225,17 +225,25 @@ func run(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-// netconfigMarkerPath and passwordMarkerPath mark completed one-shot boot
-// provisioning steps. /var/db is persistent storage on a Full-Install
-// pfSense (NanoBSD is no longer supported as of pfSense 2.6+).
+// netconfigMarkerPath marks a completed one-shot boot provisioning step.
+// /var/db is persistent storage on a Full-Install pfSense (NanoBSD is no
+// longer supported as of pfSense 2.6+).
+//
+// Password provisioning has no such marker: it ran once, self-reported
+// success from a script that turned out to be silently broken, and the
+// marker then permanently suppressed every retry — including after the
+// script was fixed, since the marker survives agent upgrades. Rerunning
+// SetDefaultUserPassword on every agent start is idempotent (same input,
+// same result) and cheap, so it's simpler and safer to just always run it.
 const (
 	netconfigMarkerPath = "/var/db/plusclouds-agent/netconfig.applied"
-	passwordMarkerPath  = "/var/db/plusclouds-agent/password-set.applied"
 )
 
-// runBootProvisioning applies one-shot, metadata-driven network and password
-// provisioning. The two steps are independent: one failing/reverting must
-// not block the other, and each retries on the next boot until it succeeds.
+// runBootProvisioning applies metadata-driven network and password
+// provisioning on every agent start. The two steps are independent: one
+// failing/reverting must not block the other. Network config is one-shot
+// (marker-gated, retried until it succeeds); password is re-applied every
+// start (see applyBootPassword for why).
 func runBootProvisioning(ctx context.Context, cfg *config.Config, iso *isoconfig.ISOMetadata, agentUUID, agentAPIKey string, pfsMod pfsense.Manager, logger *zap.Logger) {
 	applyBootNetworkConfig(ctx, cfg, iso, agentUUID, agentAPIKey, pfsMod, logger)
 	applyBootPassword(ctx, iso, pfsMod, logger)
@@ -322,18 +330,19 @@ func applyBootNetworkConfig(ctx context.Context, cfg *config.Config, iso *isocon
 
 // applyBootPassword sets the password of pfSense's default superuser
 // account (matched by uid 0, not by name — see SetDefaultUserPassword)
-// from the ISO metadata's password field. The metadata's username field
-// (e.g. "root", a generic cross-platform convention) is not used: pfSense's
-// default account is "admin" and can be renamed, so it isn't a reliable
-// name to match against. Unlike network config this carries no
-// NATS-reachability risk (a local OS/config change, not a network change),
-// so it's a simple idempotent retry-until-success with no verification
-// probe or revert.
+// from the ISO metadata's password field, every time the agent starts. The
+// metadata's username field (e.g. "root", a generic cross-platform
+// convention) is not used: pfSense's default account is "admin" and can be
+// renamed, so it isn't a reliable name to match against.
+//
+// This intentionally has no one-shot marker (see netconfigMarkerPath): a
+// marker here would gate on the script's self-reported success, and a
+// silently-broken script reporting false success — exactly what happened
+// before — would permanently suppress every future attempt, surviving
+// even an agent upgrade that fixes the underlying bug. Re-applying the same
+// password on every start is idempotent, so always running is simpler and
+// fails safe.
 func applyBootPassword(ctx context.Context, iso *isoconfig.ISOMetadata, pfsMod pfsense.Manager, logger *zap.Logger) {
-	if _, err := os.Stat(passwordMarkerPath); err == nil {
-		return
-	}
-
 	password := iso.Password()
 	if password == "" {
 		return
@@ -345,16 +354,12 @@ func applyBootPassword(ctx context.Context, iso *isoconfig.ISOMetadata, pfsMod p
 		return
 	}
 	if !result.Success {
-		logger.Warn("boot password provisioning: not applied, will retry next boot",
+		logger.Warn("boot password provisioning: not applied, will retry next start",
 			zap.String("message", result.Message),
 		)
 		return
 	}
 
-	if err := writeMarker(passwordMarkerPath); err != nil {
-		logger.Error("boot password provisioning: could not write marker file", zap.Error(err))
-		return
-	}
 	logger.Info("boot password provisioning: applied", zap.String("username", result.Username))
 }
 
