@@ -102,14 +102,18 @@ func run(_ *cobra.Command, _ []string) error {
 
 	// ------------------------------------------------------------------ //
 	// 4. Resolve identity. The top-level config-drive identity fields
-	//    (virtual_machine_id, agent_api_key) always take precedence over
-	//    whatever the merged agent.nats settings say.
+	//    (virtual_machine_id, agent_api_key) take precedence over whatever
+	//    the merged agent.nats settings say, but only when actually present —
+	//    the platform may carry the key solely at agent.nats.api_key, and an
+	//    empty top-level agent_api_key must not clobber that value.
 	// ------------------------------------------------------------------ //
 	agentUUID := cfg.NATS.AgentUUID
 	agentAPIKey := cfg.NATS.APIKey
 
 	if iso.VMID() != "" {
 		agentUUID = iso.VMID()
+	}
+	if iso.AgentAPIKey() != "" {
 		agentAPIKey = iso.AgentAPIKey()
 	}
 
