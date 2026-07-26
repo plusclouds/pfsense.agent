@@ -40,6 +40,94 @@ type Manager interface {
 	// Revert restores interface/gateway/DNS config from a snapshot
 	// previously returned by ApplyBootNetworkConfig.
 	Revert(ctx context.Context, snapshot json.RawMessage) error
+
+	// ListFirewallRules returns every rule currently in pfSense's filter
+	// config, in config.xml order.
+	ListFirewallRules(ctx context.Context) ([]FirewallRule, error)
+
+	// CreateFirewallRule appends a new filter rule and applies it live.
+	// The returned rule's Tracker is the id to pass to DeleteFirewallRule.
+	CreateFirewallRule(ctx context.Context, rule FirewallRuleInput) (*FirewallRule, error)
+
+	// DeleteFirewallRule removes the filter rule matching tracker (as
+	// returned by CreateFirewallRule/ListFirewallRules) and applies the
+	// change live. Returns an error if no rule matches.
+	DeleteFirewallRule(ctx context.Context, tracker string) error
+
+	// ListPortForwards returns every NAT port-forward rule currently in
+	// pfSense's config, in config.xml order.
+	ListPortForwards(ctx context.Context) ([]PortForward, error)
+
+	// CreatePortForward appends a new NAT port-forward rule and applies it
+	// live. The returned rule's Tracker is the id to pass to
+	// DeletePortForward.
+	CreatePortForward(ctx context.Context, pf PortForwardInput) (*PortForward, error)
+
+	// DeletePortForward removes the NAT rule matching tracker (as returned
+	// by CreatePortForward/ListPortForwards) and applies the change live.
+	// Returns an error if no rule matches.
+	DeletePortForward(ctx context.Context, tracker string) error
+}
+
+// FirewallRule is one pfSense filter (firewall) rule.
+type FirewallRule struct {
+	Tracker     string `json:"tracker"`
+	Interface   string `json:"interface"`
+	Action      string `json:"action"`
+	Protocol    string `json:"protocol,omitempty"`
+	Source      string `json:"source"`
+	SourcePort  string `json:"source_port,omitempty"`
+	Destination string `json:"destination"`
+	DestPort    string `json:"destination_port,omitempty"`
+	Description string `json:"description,omitempty"`
+	Disabled    bool   `json:"disabled,omitempty"`
+}
+
+// FirewallRuleInput is the caller-supplied shape for CreateFirewallRule.
+// Interface is pfSense's logical role name (lan/wan/optN, matching
+// InterfaceApplyResult.Logical), not the OS interface name. Source and
+// Destination accept a bare IP/CIDR, "any", or a pfSense network alias
+// (e.g. "lan" for that interface's subnet).
+type FirewallRuleInput struct {
+	Interface   string `json:"interface"`
+	Action      string `json:"action"` // pass, block, or reject
+	Protocol    string `json:"protocol,omitempty"`
+	Source      string `json:"source"`
+	SourcePort  string `json:"source_port,omitempty"`
+	Destination string `json:"destination"`
+	DestPort    string `json:"destination_port,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// PortForward is one pfSense NAT port-forward rule.
+type PortForward struct {
+	Tracker     string `json:"tracker"`
+	Interface   string `json:"interface"`
+	Protocol    string `json:"protocol"`
+	Source      string `json:"source,omitempty"`
+	SourcePort  string `json:"source_port,omitempty"`
+	Destination string `json:"destination,omitempty"`
+	DestPort    string `json:"destination_port"`
+	TargetIP    string `json:"target_ip"`
+	TargetPort  string `json:"target_port"`
+	Description string `json:"description,omitempty"`
+	Disabled    bool   `json:"disabled,omitempty"`
+}
+
+// PortForwardInput is the caller-supplied shape for CreatePortForward.
+// Interface is pfSense's logical role name (lan/wan/optN). Destination
+// defaults to that interface's own address (pfSense's "<if>ip" shorthand,
+// the common port-forward case) when left empty.
+type PortForwardInput struct {
+	Interface   string `json:"interface"`
+	Protocol    string `json:"protocol"` // tcp, udp, or tcp/udp
+	Source      string `json:"source,omitempty"`
+	SourcePort  string `json:"source_port,omitempty"`
+	Destination string `json:"destination,omitempty"`
+	DestPort    string `json:"destination_port"`
+	TargetIP    string `json:"target_ip"`
+	TargetPort  string `json:"target_port"`
+	Description string `json:"description,omitempty"`
 }
 
 // SetPasswordResult is the outcome of a SetPassword call.

@@ -120,6 +120,20 @@ The agent announces its available operations on boot via a `capabilities` event.
 | `vm.shutdown` | Shut down the machine | — |
 | `exec` | Run an allowed binary | `command` (string), `args` (array) |
 | `pfsense.set_password` | Change a local pfSense user's password (pfSense/FreeBSD only) | `username` (string), `password` (string, sensitive) |
+| `pfsense.firewall.list` | List firewall (filter) rules (pfSense/FreeBSD only) | — |
+| `pfsense.firewall.create` | Create a firewall rule (pfSense/FreeBSD only) | `interface`, `action` (`pass`/`block`/`reject`), `protocol`, `source`, `source_port`, `destination`, `destination_port`, `description` |
+| `pfsense.firewall.delete` | Delete a firewall rule (pfSense/FreeBSD only) | `tracker` (string, as returned by `create`/`list`) |
+| `pfsense.nat.list` | List NAT port-forward rules (pfSense/FreeBSD only) | — |
+| `pfsense.nat.create` | Create a NAT port-forward rule (pfSense/FreeBSD only) | `interface`, `protocol` (`tcp`/`udp`/`tcp/udp`), `destination_port`, `target_ip`, `target_port`, `source`, `source_port`, `destination`, `description` |
+| `pfsense.nat.delete` | Delete a NAT port-forward rule (pfSense/FreeBSD only) | `tracker` (string, as returned by `create`/`list`) |
+
+Firewall/NAT `interface` values are pfSense's logical interface names
+(`lan`, `wan`, `optN`, ...), not OS interface names. `source`/`destination`
+accept a bare IP/CIDR, `any`, or a pfSense interface alias (e.g. `lan` for
+that interface's subnet); `nat.create`'s `destination` defaults to the
+target interface's own address when omitted, matching the webConfigurator's
+port-forward wizard default. Every create call applies the change live via
+pfSense's `filter_configure()` — no separate "apply" step.
 
 All operations are opt-in. Remove any entry from `allowed_operations` in the config-drive's `agent` settings and the platform receives a `rejected` result instead of executing it.
 
@@ -335,6 +349,7 @@ The two steps are independent — a reverted network change does not block passw
 | `system.update` | ✅ Ubuntu/Debian | ✗ | ✗ |
 | `vm.reboot` / `vm.shutdown` | ✅ `systemctl` | ✅ `shutdown /r` | ✗ (uses `systemctl`, not yet FreeBSD-aware) |
 | `pfsense.set_password` | ✗ | ✗ | ✅ pfSense config/auth subsystem |
+| `pfsense.firewall.*` / `pfsense.nat.*` | ✗ | ✗ | ✅ pfSense filter/NAT config subsystem |
 | Boot-time metadata provisioning (network + password) | ✗ | ✗ | ✅ one-shot, see below |
 
 ---

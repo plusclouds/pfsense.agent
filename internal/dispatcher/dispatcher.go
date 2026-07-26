@@ -88,6 +88,12 @@ type params struct {
 	Password  string   `json:"password"`
 }
 
+// trackerParams is the params shape for operations that address an
+// existing firewall rule or NAT port-forward by its tracker id.
+type trackerParams struct {
+	Tracker string `json:"tracker"`
+}
+
 // Dispatch handles a single command envelope and returns the result envelope.
 // It always returns a valid result — errors become failed/rejected statuses.
 func (d *Dispatcher) Dispatch(ctx context.Context, env protocol.Envelope) protocol.Envelope {
@@ -137,7 +143,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, env protocol.Envelope) protoc
 		}
 	}
 
-	output, err := d.run(ctx, op, p)
+	output, err := d.run(ctx, op, p, cmd.Params)
 	if err != nil {
 		result := d.fail(env, err.Error())
 		d.logResult(env.ID, op, protocol.StatusFailed, err.Error(), time.Since(start))
@@ -175,8 +181,11 @@ func (d *Dispatcher) logResult(commandID, op, status, msg string, elapsed time.D
 	}
 }
 
-// run executes the operation and returns the output or an error.
-func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) {
+// run executes the operation and returns the output or an error. rawParams
+// is the undecoded command params JSON, available for operations whose
+// payload shape (e.g. nested firewall rule fields) doesn't fit the shared
+// flat params struct.
+func (d *Dispatcher) run(ctx context.Context, op string, p params, rawParams json.RawMessage) (any, error) {
 	switch op {
 	// ---- system -------------------------------------------------------
 	case "system.info":
@@ -300,6 +309,40 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) 
 	// ---- pfsense --------------------------------------------------------
 	case "pfsense.set_password":
 		return d.pfs.SetPassword(ctx, p.Username, p.Password)
+	case "pfsense.firewall.list":
+		return d.pfs.ListFirewallRules(ctx)
+	case "pfsense.firewall.create":
+		var req pfsense.FirewallRuleInput
+		if err := json.Unmarshal(rawParams, &req); err != nil {
+			return nil, fmt.Errorf("could not decode params: %w", err)
+		}
+		return d.pfs.CreateFirewallRule(ctx, req)
+	case "pfsense.firewall.delete":
+		var req trackerParams
+		if err := json.Unmarshal(rawParams, &req); err != nil {
+			return nil, fmt.Errorf("could not decode params: %w", err)
+		}
+		if err := d.pfs.DeleteFirewallRule(ctx, req.Tracker); err != nil {
+			return nil, err
+		}
+		return map[string]string{"tracker": req.Tracker}, nil
+	case "pfsense.nat.list":
+		return d.pfs.ListPortForwards(ctx)
+	case "pfsense.nat.create":
+		var req pfsense.PortForwardInput
+		if err := json.Unmarshal(rawParams, &req); err != nil {
+			return nil, fmt.Errorf("could not decode params: %w", err)
+		}
+		return d.pfs.CreatePortForward(ctx, req)
+	case "pfsense.nat.delete":
+		var req trackerParams
+		if err := json.Unmarshal(rawParams, &req); err != nil {
+			return nil, fmt.Errorf("could not decode params: %w", err)
+		}
+		if err := d.pfs.DeletePortForward(ctx, req.Tracker); err != nil {
+			return nil, err
+		}
+		return map[string]string{"tracker": req.Tracker}, nil
 
 	// ---- exec ---------------------------------------------------------
 	case "exec":

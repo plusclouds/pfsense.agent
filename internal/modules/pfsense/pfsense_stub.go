@@ -44,3 +44,27 @@ func (m *stubManager) ApplyBootNetworkConfig(_ context.Context, _ []isoconfig.Vi
 func (m *stubManager) Revert(_ context.Context, _ json.RawMessage) error {
 	return nil
 }
+
+func (m *stubManager) ListFirewallRules(_ context.Context) ([]FirewallRule, error) {
+	return nil, errNotSupported
+}
+
+func (m *stubManager) CreateFirewallRule(_ context.Context, _ FirewallRuleInput) (*FirewallRule, error) {
+	return nil, errNotSupported
+}
+
+func (m *stubManager) DeleteFirewallRule(_ context.Context, _ string) error {
+	return errNotSupported
+}
+
+func (m *stubManager) ListPortForwards(_ context.Context) ([]PortForward, error) {
+	return nil, errNotSupported
+}
+
+func (m *stubManager) CreatePortForward(_ context.Context, _ PortForwardInput) (*PortForward, error) {
+	return nil, errNotSupported
+}
+
+func (m *stubManager) DeletePortForward(_ context.Context, _ string) error {
+	return errNotSupported
+}

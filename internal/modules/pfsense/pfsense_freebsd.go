@@ -38,6 +38,24 @@ var netconfigApplyScript string
 //go:embed scripts/netconfig/restore.php
 var netconfigRestoreScript string
 
+//go:embed scripts/firewall/list.php
+var firewallListScript string
+
+//go:embed scripts/firewall/create.php
+var firewallCreateScript string
+
+//go:embed scripts/firewall/delete.php
+var firewallDeleteScript string
+
+//go:embed scripts/nat/list.php
+var natListScript string
+
+//go:embed scripts/nat/create.php
+var natCreateScript string
+
+//go:embed scripts/nat/delete.php
+var natDeleteScript string
+
 const phpBinary = "/usr/local/bin/php"
 
 // freebsdManager runs pfSense operations by shelling out to pfSense's own
@@ -287,6 +305,167 @@ func (m *freebsdManager) Revert(ctx context.Context, snapshot json.RawMessage) e
 	}
 	if out.Status != "ok" {
 		return fmt.Errorf("unexpected restore script status: %s", out.Status)
+	}
+	return nil
+}
+
+type firewallListScriptOutput struct {
+	Status string         `json:"status"`
+	Rules  []FirewallRule `json:"rules"`
+}
+
+type firewallCreateScriptOutput struct {
+	Status  string `json:"status"`
+	Tracker string `json:"tracker"`
+}
+
+type natListScriptOutput struct {
+	Status       string        `json:"status"`
+	PortForwards []PortForward `json:"port_forwards"`
+}
+
+type natCreateScriptOutput struct {
+	Status  string `json:"status"`
+	Tracker string `json:"tracker"`
+}
+
+// ListFirewallRules runs the embedded script that reads pfSense's filter
+// config directly, so the result always matches config.xml.
+func (m *freebsdManager) ListFirewallRules(ctx context.Context) ([]FirewallRule, error) {
+	stdout, stderr, err := runEmbeddedPHP(ctx, m.exec, firewallListScript, "list.php", nil)
+	if err != nil {
+		return nil, fmt.Errorf("listing firewall rules: %w (%s)", err, stderr)
+	}
+	var out firewallListScriptOutput
+	if jsonErr := json.Unmarshal([]byte(stdout), &out); jsonErr != nil {
+		return nil, fmt.Errorf("parsing firewall list script output %q: %w", stdout, jsonErr)
+	}
+	if out.Status != "ok" {
+		return nil, fmt.Errorf("unexpected firewall list script status: %s", out.Status)
+	}
+	return out.Rules, nil
+}
+
+// CreateFirewallRule runs the embedded script that appends a filter rule
+// and applies it live via filter_configure().
+func (m *freebsdManager) CreateFirewallRule(ctx context.Context, rule FirewallRuleInput) (*FirewallRule, error) {
+	input, err := json.Marshal(rule)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling firewall rule: %w", err)
+	}
+	stdout, stderr, err := runEmbeddedPHP(ctx, m.exec, firewallCreateScript, "create.php", input)
+	if err != nil {
+		msg := stderr
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, fmt.Errorf("creating firewall rule: %s", msg)
+	}
+	var out firewallCreateScriptOutput
+	if jsonErr := json.Unmarshal([]byte(stdout), &out); jsonErr != nil {
+		return nil, fmt.Errorf("parsing firewall create script output %q: %w", stdout, jsonErr)
+	}
+	if out.Status != "ok" {
+		return nil, fmt.Errorf("unexpected firewall create script status: %s", out.Status)
+	}
+	created := rule
+	return &FirewallRule{
+		Tracker:     out.Tracker,
+		Interface:   created.Interface,
+		Action:      created.Action,
+		Protocol:    created.Protocol,
+		Source:      created.Source,
+		SourcePort:  created.SourcePort,
+		Destination: created.Destination,
+		DestPort:    created.DestPort,
+		Description: created.Description,
+	}, nil
+}
+
+// DeleteFirewallRule runs the embedded script that removes the filter rule
+// matching tracker and applies the change live via filter_configure().
+func (m *freebsdManager) DeleteFirewallRule(ctx context.Context, tracker string) error {
+	if tracker == "" {
+		return fmt.Errorf("tracker must not be empty")
+	}
+	_, stderr, err := runEmbeddedPHP(ctx, m.exec, firewallDeleteScript, "delete.php", nil, tracker)
+	if err != nil {
+		msg := stderr
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("deleting firewall rule %s: %s", tracker, msg)
+	}
+	return nil
+}
+
+// ListPortForwards runs the embedded script that reads pfSense's NAT
+// config directly, so the result always matches config.xml.
+func (m *freebsdManager) ListPortForwards(ctx context.Context) ([]PortForward, error) {
+	stdout, stderr, err := runEmbeddedPHP(ctx, m.exec, natListScript, "list.php", nil)
+	if err != nil {
+		return nil, fmt.Errorf("listing port forwards: %w (%s)", err, stderr)
+	}
+	var out natListScriptOutput
+	if jsonErr := json.Unmarshal([]byte(stdout), &out); jsonErr != nil {
+		return nil, fmt.Errorf("parsing nat list script output %q: %w", stdout, jsonErr)
+	}
+	if out.Status != "ok" {
+		return nil, fmt.Errorf("unexpected nat list script status: %s", out.Status)
+	}
+	return out.PortForwards, nil
+}
+
+// CreatePortForward runs the embedded script that appends a NAT
+// port-forward rule and applies it live via filter_configure().
+func (m *freebsdManager) CreatePortForward(ctx context.Context, pf PortForwardInput) (*PortForward, error) {
+	input, err := json.Marshal(pf)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling port forward: %w", err)
+	}
+	stdout, stderr, err := runEmbeddedPHP(ctx, m.exec, natCreateScript, "create.php", input)
+	if err != nil {
+		msg := stderr
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, fmt.Errorf("creating port forward: %s", msg)
+	}
+	var out natCreateScriptOutput
+	if jsonErr := json.Unmarshal([]byte(stdout), &out); jsonErr != nil {
+		return nil, fmt.Errorf("parsing nat create script output %q: %w", stdout, jsonErr)
+	}
+	if out.Status != "ok" {
+		return nil, fmt.Errorf("unexpected nat create script status: %s", out.Status)
+	}
+	created := pf
+	return &PortForward{
+		Tracker:     out.Tracker,
+		Interface:   created.Interface,
+		Protocol:    created.Protocol,
+		Source:      created.Source,
+		SourcePort:  created.SourcePort,
+		Destination: created.Destination,
+		DestPort:    created.DestPort,
+		TargetIP:    created.TargetIP,
+		TargetPort:  created.TargetPort,
+		Description: created.Description,
+	}, nil
+}
+
+// DeletePortForward runs the embedded script that removes the NAT rule
+// matching tracker and applies the change live via filter_configure().
+func (m *freebsdManager) DeletePortForward(ctx context.Context, tracker string) error {
+	if tracker == "" {
+		return fmt.Errorf("tracker must not be empty")
+	}
+	_, stderr, err := runEmbeddedPHP(ctx, m.exec, natDeleteScript, "delete.php", nil, tracker)
+	if err != nil {
+		msg := stderr
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("deleting port forward %s: %s", tracker, msg)
 	}
 	return nil
 }

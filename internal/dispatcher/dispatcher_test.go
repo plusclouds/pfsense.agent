@@ -43,6 +43,51 @@ func (f *fakePfsense) Revert(_ context.Context, _ json.RawMessage) error {
 	return nil
 }
 
+func (f *fakePfsense) ListFirewallRules(_ context.Context) ([]pfsense.FirewallRule, error) {
+	return nil, nil
+}
+
+func (f *fakePfsense) CreateFirewallRule(_ context.Context, rule pfsense.FirewallRuleInput) (*pfsense.FirewallRule, error) {
+	return &pfsense.FirewallRule{
+		Tracker:     "123",
+		Interface:   rule.Interface,
+		Action:      rule.Action,
+		Protocol:    rule.Protocol,
+		Source:      rule.Source,
+		SourcePort:  rule.SourcePort,
+		Destination: rule.Destination,
+		DestPort:    rule.DestPort,
+		Description: rule.Description,
+	}, nil
+}
+
+func (f *fakePfsense) DeleteFirewallRule(_ context.Context, _ string) error {
+	return nil
+}
+
+func (f *fakePfsense) ListPortForwards(_ context.Context) ([]pfsense.PortForward, error) {
+	return nil, nil
+}
+
+func (f *fakePfsense) CreatePortForward(_ context.Context, pf pfsense.PortForwardInput) (*pfsense.PortForward, error) {
+	return &pfsense.PortForward{
+		Tracker:     "123",
+		Interface:   pf.Interface,
+		Protocol:    pf.Protocol,
+		Source:      pf.Source,
+		SourcePort:  pf.SourcePort,
+		Destination: pf.Destination,
+		DestPort:    pf.DestPort,
+		TargetIP:    pf.TargetIP,
+		TargetPort:  pf.TargetPort,
+		Description: pf.Description,
+	}, nil
+}
+
+func (f *fakePfsense) DeletePortForward(_ context.Context, _ string) error {
+	return nil
+}
+
 // noopServices is a services.Manager that panics if used — the redaction
 // test below never exercises service operations.
 type noopServices struct{}
