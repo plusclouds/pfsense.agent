@@ -68,3 +68,7 @@ func (m *stubManager) CreatePortForward(_ context.Context, _ PortForwardInput) (
 func (m *stubManager) DeletePortForward(_ context.Context, _ string) error {
 	return errNotSupported
 }
+
+func (m *stubManager) ListDHCPLeases(_ context.Context) ([]DHCPLease, error) {
+	return nil, errNotSupported
+}

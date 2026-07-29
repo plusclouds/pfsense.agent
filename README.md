@@ -126,6 +126,7 @@ The agent announces its available operations on boot via a `capabilities` event.
 | `pfsense.nat.list` | List NAT port-forward rules (pfSense/FreeBSD only) | — |
 | `pfsense.nat.create` | Create a NAT port-forward rule (pfSense/FreeBSD only) | `interface`, `protocol` (`tcp`/`udp`/`tcp/udp`), `destination_port`, `target_ip`, `target_port`, `source`, `source_port`, `destination`, `description` |
 | `pfsense.nat.delete` | Delete a NAT port-forward rule (pfSense/FreeBSD only) | `tracker` (string, as returned by `create`/`list`) |
+| `pfsense.dhcp.leases` | List DHCP leases, dynamic and static, IP/MAC/hostname (pfSense/FreeBSD only) | — |
 
 Firewall/NAT `interface` values are pfSense's logical interface names
 (`lan`, `wan`, `optN`, ...), not OS interface names. `source`/`destination`
@@ -350,6 +351,7 @@ The two steps are independent — a reverted network change does not block passw
 | `vm.reboot` / `vm.shutdown` | ✅ `systemctl` | ✅ `shutdown /r` | ✗ (uses `systemctl`, not yet FreeBSD-aware) |
 | `pfsense.set_password` | ✗ | ✗ | ✅ pfSense config/auth subsystem |
 | `pfsense.firewall.*` / `pfsense.nat.*` | ✗ | ✗ | ✅ pfSense filter/NAT config subsystem |
+| `pfsense.dhcp.leases` | ✗ | ✗ | ✅ pfSense `system_get_dhcpleases()` (ISC dhcpd or Kea) |
 | Boot-time metadata provisioning (network + password) | ✗ | ✗ | ✅ one-shot, see below |
 
 ---

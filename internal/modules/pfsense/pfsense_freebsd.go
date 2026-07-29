@@ -56,6 +56,9 @@ var natCreateScript string
 //go:embed scripts/nat/delete.php
 var natDeleteScript string
 
+//go:embed scripts/dhcp/list.php
+var dhcpLeasesListScript string
+
 const phpBinary = "/usr/local/bin/php"
 
 // freebsdManager runs pfSense operations by shelling out to pfSense's own
@@ -329,6 +332,11 @@ type natCreateScriptOutput struct {
 	Tracker string `json:"tracker"`
 }
 
+type dhcpLeasesListScriptOutput struct {
+	Status string      `json:"status"`
+	Leases []DHCPLease `json:"leases"`
+}
+
 // ListFirewallRules runs the embedded script that reads pfSense's filter
 // config directly, so the result always matches config.xml.
 func (m *freebsdManager) ListFirewallRules(ctx context.Context) ([]FirewallRule, error) {
@@ -468,4 +476,23 @@ func (m *freebsdManager) DeletePortForward(ctx context.Context, tracker string) 
 		return fmt.Errorf("deleting port forward %s: %s", tracker, msg)
 	}
 	return nil
+}
+
+// ListDHCPLeases runs the embedded script that reads pfSense's DHCP lease
+// state via system_get_dhcpleases(), so the result matches the
+// webConfigurator's Status > DHCP Leases page on both the ISC dhcpd and Kea
+// backends.
+func (m *freebsdManager) ListDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
+	stdout, stderr, err := runEmbeddedPHP(ctx, m.exec, dhcpLeasesListScript, "list.php", nil)
+	if err != nil {
+		return nil, fmt.Errorf("listing DHCP leases: %w (%s)", err, stderr)
+	}
+	var out dhcpLeasesListScriptOutput
+	if jsonErr := json.Unmarshal([]byte(stdout), &out); jsonErr != nil {
+		return nil, fmt.Errorf("parsing dhcp leases list script output %q: %w", stdout, jsonErr)
+	}
+	if out.Status != "ok" {
+		return nil, fmt.Errorf("unexpected dhcp leases list script status: %s", out.Status)
+	}
+	return out.Leases, nil
 }

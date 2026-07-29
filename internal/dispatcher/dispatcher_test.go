@@ -88,6 +88,10 @@ func (f *fakePfsense) DeletePortForward(_ context.Context, _ string) error {
 	return nil
 }
 
+func (f *fakePfsense) ListDHCPLeases(_ context.Context) ([]pfsense.DHCPLease, error) {
+	return nil, nil
+}
+
 // noopServices is a services.Manager that panics if used — the redaction
 // test below never exercises service operations.
 type noopServices struct{}

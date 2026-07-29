@@ -67,6 +67,12 @@ type Manager interface {
 	// by CreatePortForward/ListPortForwards) and applies the change live.
 	// Returns an error if no rule matches.
 	DeletePortForward(ctx context.Context, tracker string) error
+
+	// ListDHCPLeases returns every DHCP lease (dynamic and static) known to
+	// pfSense's DHCP server, matching whatever the webConfigurator's
+	// Status > DHCP Leases page would show, on both the ISC dhcpd and Kea
+	// backends.
+	ListDHCPLeases(ctx context.Context) ([]DHCPLease, error)
 }
 
 // FirewallRule is one pfSense filter (firewall) rule.
@@ -128,6 +134,21 @@ type PortForwardInput struct {
 	TargetIP    string `json:"target_ip"`
 	TargetPort  string `json:"target_port"`
 	Description string `json:"description,omitempty"`
+}
+
+// DHCPLease is one DHCP lease (dynamic or static) known to pfSense's DHCP
+// server.
+type DHCPLease struct {
+	IP          string `json:"ip"`
+	MAC         string `json:"mac,omitempty"`
+	Hostname    string `json:"hostname,omitempty"`
+	Description string `json:"description,omitempty"`
+	Interface   string `json:"interface,omitempty"`
+	Type        string `json:"type,omitempty"`  // dynamic or static
+	State       string `json:"state,omitempty"` // active, expired, or static
+	Online      string `json:"online,omitempty"`
+	Starts      string `json:"starts,omitempty"`
+	Ends        string `json:"ends,omitempty"`
 }
 
 // SetPasswordResult is the outcome of a SetPassword call.

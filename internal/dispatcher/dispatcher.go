@@ -343,6 +343,8 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params, rawParams jso
 			return nil, err
 		}
 		return map[string]string{"tracker": req.Tracker}, nil
+	case "pfsense.dhcp.leases":
+		return d.pfs.ListDHCPLeases(ctx)
 
 	// ---- exec ---------------------------------------------------------
 	case "exec":
