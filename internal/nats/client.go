@@ -31,7 +31,7 @@ type Client struct {
 // subscribe) is therefore not available to the agent. Message durability is
 // handled server-side by the AGENT_COMMANDS JetStream stream; the platform
 // retries unacknowledged commands via AgentCommandTimeoutCommand.
-func Connect(cfg config.NATSConfig, agentUUID, agentAPIKey string, logger *zap.Logger) (*Client, error) {
+func Connect(cfg config.NATSConfig, agentUUID, agentAPIKey string, logger *zap.Logger, extraOpts ...nats.Option) (*Client, error) {
 	opts := []nats.Option{
 		nats.Name("plusclouds-vm-agent:" + agentUUID),
 		nats.UserInfo(agentUUID, agentAPIKey),
@@ -49,6 +49,7 @@ func Connect(cfg config.NATSConfig, agentUUID, agentAPIKey string, logger *zap.L
 			logger.Info("NATS connection closed")
 		}),
 	}
+	opts = append(opts, extraOpts...)
 
 	activeURL := cfg.ActiveURL()
 	logger.Info("connecting to NATS",

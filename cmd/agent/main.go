@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/spf13/cobra"
@@ -253,9 +254,17 @@ func runBootProvisioning(ctx context.Context, cfg *config.Config, iso *isoconfig
 	applyBootPassword(ctx, iso, pfsMod, logger)
 }
 
+// bootProbeTimeout is the connect deadline for the boot-time NATS
+// verification probe. It is deliberately generous (well above nats.go's
+// 2s default) because the probe runs immediately after interface_configure()
+// flips the WAN IP live, while ARP/gateway convergence may still be
+// settling — a too-tight timeout here caused correctly-applied WAN configs
+// to be spuriously reverted.
+const bootProbeTimeout = 15 * time.Second
+
 // applyBootNetworkConfig sets static addressing on already-assigned pfSense
 // interfaces from the ISO metadata, then verifies the change by attempting a
-// real (short, non-retrying) NATS connect — if the platform can't be reached
+// real (non-retrying) NATS connect — if the platform can't be reached
 // afterward, it reverts to the pre-change snapshot so the box stays
 // reachable and retries on the next boot. Only a verified-successful apply
 // is marked done.
@@ -293,7 +302,7 @@ func applyBootNetworkConfig(ctx context.Context, cfg *config.Config, iso *isocon
 	// connect used in step 6 — this one is only here to prove reachability.
 	probeCfg := cfg.NATS
 	probeCfg.MaxReconnects = 0
-	nc, probeErr := natsclient.Connect(probeCfg, agentUUID, agentAPIKey, logger)
+	nc, probeErr := natsclient.Connect(probeCfg, agentUUID, agentAPIKey, logger, nats.Timeout(bootProbeTimeout))
 	if probeErr == nil {
 		nc.Drain()
 	}
